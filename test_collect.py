@@ -1,4 +1,5 @@
 import unittest
+import os
 import tempfile
 import csv
 import json
@@ -41,7 +42,7 @@ class CollectorTests(unittest.TestCase):
 
     def test_extract_real_dom(self):
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True, executable_path='/usr/bin/chromium')
+            browser = pw.chromium.launch(headless=True, executable_path=os.environ.get('COLLECTOR_BROWSER') or None)
             page = browser.new_page()
             page.set_content('''<span data-marker="page-title/count">2 объявления</span>
               <article data-marker="item"><a href="/user/wrong_thing">Компания</a>

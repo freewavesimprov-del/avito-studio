@@ -7,9 +7,10 @@
 Python 3.10+; команды выполняются в каталоге проекта:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m playwright install chromium
+python3 -m venv .venv &&
+.venv/bin/python -m pip install --upgrade pip &&
+.venv/bin/python -m pip install -r requirements.txt &&
+.venv/bin/python -m playwright install chromium &&
 .venv/bin/python collect.py --pages 2
 ```
 
