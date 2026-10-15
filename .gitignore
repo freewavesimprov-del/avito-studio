@@ -1,0 +1,7 @@
+.venv/
+.browser-profile*/
+snapshot-*.json
+__pycache__/
+*.log
+.env
+results/
