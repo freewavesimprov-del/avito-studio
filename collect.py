@@ -28,6 +28,14 @@ class AccessRestricted(RuntimeError):
     """Сайт явно запретил доступ: дальнейшие запросы прекращаем."""
 
 
+class BrowserClosed(RuntimeError):
+    """Окно закрыто пользователем либо завершился браузер."""
+
+
+def browser_closed(page, exc: Exception) -> bool:
+    return page.is_closed() is True or "has been closed" in str(exc).lower()
+
+
 def load_listing_page(page, url: str, observation: dict | None = None) -> None:
     if observation is None:
         observation = {}
@@ -44,8 +52,10 @@ def load_listing_page(page, url: str, observation: dict | None = None) -> None:
     try:
         page.wait_for_selector('[data-marker="item"]', state="visible", timeout=45000)
         observation["listing_ready"] = True
-    except Exception:
+    except Exception as exc:
         observation["listing_ready"] = False
+        if browser_closed(page, exc):
+            raise BrowserClosed("browser_closed") from None
         if _blocked(page):
             raise AccessRestricted("access_restricted_after_wait") from None
         if response is not None and response.status in (403, 429, 439):
@@ -276,7 +286,8 @@ def collect(cfg: dict, pages: int, checkpoint: Path | None = None,
                     load_listing_page(page, url, observation)
                     data = page.evaluate(EXTRACT_JS)
                 except Exception as exc:
-                    reason = "access_restricted" if isinstance(exc, AccessRestricted) else "page_unavailable"
+                    reason = ("browser_closed" if isinstance(exc, BrowserClosed) or browser_closed(page, exc)
+                              else "access_restricted" if isinstance(exc, AccessRestricted) else "page_unavailable")
                     block["errors"].append({"page": page_no, "reason": reason, "url": url,
                                             "at": datetime.now().isoformat(timespec="seconds")})
                     block["status"] = "partial" if block["items"] else "failed"
@@ -289,7 +300,7 @@ def collect(cfg: dict, pages: int, checkpoint: Path | None = None,
                         except Exception as diagnostic_error:
                             log(f"Не удалось сохранить диагностику: {diagnostic_error}")
                     write_checkpoint(checkpoint, state)
-                    if diagnose and not cfg.get("headless", False):
+                    if diagnose and reason != "browser_closed" and not cfg.get("headless", False):
                         inspect_browser()
                     log(f"Остановлено: {reason}. Прогресс сохранён; автоматических повторов нет.")
                     return result

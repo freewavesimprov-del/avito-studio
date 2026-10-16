@@ -176,6 +176,18 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(page.title(), 'Объявления')
             browser.close()
 
+    def test_closed_window_is_not_reported_as_restriction(self):
+        page = MagicMock()
+        page.goto.return_value.status = 403
+        page.goto.return_value.headers = {}
+        page.is_closed.return_value = True
+        page.wait_for_selector.side_effect = RuntimeError('Target page, context or browser has been closed')
+        observation = {}
+        with self.assertRaises(collect.BrowserClosed):
+            collect.load_listing_page(page, 'https://www.avito.ru/', observation)
+        self.assertFalse(observation['listing_ready'])
+        self.assertEqual(observation['http_status'], 403)
+
     def test_extract_real_dom(self):
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True, executable_path=os.environ.get('COLLECTOR_BROWSER') or None)
