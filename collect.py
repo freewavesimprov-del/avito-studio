@@ -1,7 +1,7 @@
 """Сбор объявлений об услугах гидроизоляционного инъектирования.
 
 Выдача по релевантности и по дате — отдельные наблюдения, не оценки сделок.
-Работает через Playwright. результаты сохраняются локально в JSON и CSV.
+Работает через Playwright. Результаты сохраняются локально в JSON и CSV.
 """
 from __future__ import annotations
 
@@ -390,4 +390,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        log("Остановлено пользователем. Если есть progress.json, продолжите с --resume.")
+        raise SystemExit(130)
+    except ModuleNotFoundError as exc:
+        if exc.name and exc.name.startswith("playwright"):
+            log("Playwright не установлен. Запустите «Установить.command» или установите requirements.txt.")
+            raise SystemExit(1)
+        raise
+    except (ValueError, OSError) as exc:
+        log(f"Ошибка настроек или файлов: {exc}")
+        raise SystemExit(1)
