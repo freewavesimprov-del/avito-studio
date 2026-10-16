@@ -167,7 +167,7 @@ class CollectorTests(unittest.TestCase):
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True, executable_path=os.environ.get('COLLECTOR_BROWSER') or None)
             page = browser.new_page()
-            page.route('https://example.test/**', lambda route: route.fulfill(status=439, content_type='text/html', body='''<title>Доступ ограничен: проверка безопасности</title><body>Проверка пройдена, перенаправление…
+            page.route('https://example.test/**', lambda route: route.fulfill(status=439, content_type='text/html; charset=utf-8', body='''<title>Доступ ограничен: проверка безопасности</title><body>Проверка пройдена, перенаправление…
                 <script>setTimeout(() => { document.title = 'Объявления'; document.body.innerHTML = '<div data-marker="item">Карточка</div>'; }, 200);</script></body>'''))
             observation = {}
             collect.load_listing_page(page, 'https://example.test/search', observation)
