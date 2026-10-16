@@ -4,7 +4,7 @@ import tempfile
 import csv
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import collect
 from playwright.sync_api import sync_playwright
 
@@ -39,6 +39,38 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertTrue(rows[0]['title'].startswith("'="))
             self.assertEqual(rows[0]['url'], 'https://www.avito.ru/moskva/uslugi/test_123')
+
+    def test_access_restricted_stops_entire_run_and_retains_first_page(self):
+        page = MagicMock()
+        page.goto.side_effect = [MagicMock(status=200), MagicMock(status=429)]
+        page.title.return_value = "Авито"
+        page.evaluate.return_value = {"total": 100, "items": [
+            {"id": str(i), "title": "Инъектирование трещин", "position": i + 1}
+            for i in range(50)]}
+        ctx = MagicMock()
+        ctx.pages = [page]
+        pw = MagicMock()
+        pw.chromium.launch_persistent_context.return_value = ctx
+        manager = MagicMock()
+        manager.__enter__.return_value = pw
+        cfg = collect.load_config()
+        with patch('playwright.sync_api.sync_playwright', return_value=manager), patch('collect.time.sleep'):
+            data = collect.collect(cfg, 2)
+        self.assertEqual(page.goto.call_count, 2)
+        self.assertEqual(page.wait_for_selector.call_count, 1)
+        self.assertEqual(len(data['queries'][0]['items']), 50)
+        self.assertEqual(data['queries'][0]['status'], 'partial')
+        self.assertEqual(data['stop_reason'], 'access_restricted')
+        self.assertEqual(data['queries_not_run'], 15)
+        ctx.close.assert_called_once()
+
+    def test_restriction_in_title_stops_before_wait(self):
+        page = MagicMock()
+        page.goto.return_value.status = 200
+        page.title.return_value = "Доступ ограничен"
+        with self.assertRaises(collect.AccessRestricted):
+            collect.load_listing_page(page, 'https://www.avito.ru/')
+        page.wait_for_selector.assert_not_called()
 
     def test_extract_real_dom(self):
         with sync_playwright() as pw:

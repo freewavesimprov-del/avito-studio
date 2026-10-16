@@ -20,17 +20,26 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "queries.json"
 
-# Пауза между страницами. Ходим медленнее человека: задача не выкачать рынок,
-# а раз в неделю снять срез, оставшись незаметными.
+# Паузы ограничивают частоту запросов; доступность сайта не гарантируется.
 PAUSE = (7.0, 14.0)
-
-# Профиль браузера храним между запусками: куки и история делают нас
-# возвращающимся посетителем, а не новым безликим клиентом при каждом заходе.
-# Без профиля защита срабатывает уже на втором запросе подряд.
+# Локальный постоянный профиль браузера.
 PROFILE = HERE / ".browser-profile"
 
-# Сколько ждать, если всё-таки поймали ограничение доступа.
-COOLDOWN = 90
+
+class AccessRestricted(RuntimeError):
+    """Сайт явно запретил доступ: дальнейшие запросы прекращаем."""
+
+
+def load_listing_page(page, url: str) -> None:
+    response = page.goto(url, wait_until="domcontentloaded", timeout=45000)
+    if (response is not None and response.status in (403, 429)) or _blocked(page):
+        raise AccessRestricted("access_restricted")
+    try:
+        page.wait_for_selector('[data-marker="item"]', timeout=25000)
+    except Exception:
+        if _blocked(page):
+            raise AccessRestricted("access_restricted") from None
+        raise
 
 
 def log(msg: str) -> None:
@@ -137,7 +146,8 @@ EXTRACT_JS = r"""
 
 def _blocked(page) -> bool:
     try:
-        return "Доступ ограничен" in page.title()
+        title = page.title().lower()
+        return "доступ ограничен" in title or "доступ временно заблокирован" in title
     except Exception:
         return False
 
@@ -179,22 +189,16 @@ def collect(cfg: dict, pages: int) -> dict:
                     url = (f'https://www.avito.ru/{region["slug"]}/'
                            f'{cfg.get("category_path", "predlozheniya_uslug")}'
                            f'?q={urllib.parse.quote(query)}&p={page_no}{sort_suffix}')
-                    ok = False
-                    for attempt in (1, 2):
-                        try:
-                            page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                            page.wait_for_selector('[data-marker="item"]', timeout=25000)
-                            ok = True
-                            break
-                        except Exception as exc:
-                            if _blocked(page) and attempt == 1:
-                                log(f'  … ограничение доступа, ждём {COOLDOWN} с')
-                                time.sleep(COOLDOWN)
-                                continue
-                            log(f'  !! {query} / {region["name"]} стр.{page_no}: {str(exc)[:70]}')
-                            break
-                    if not ok:
-                        errors.append({"page": page_no, "reason": "page_unavailable"})
+                    try:
+                        load_listing_page(page, url)
+                    except Exception as exc:
+                        restricted = isinstance(exc, AccessRestricted)
+                        errors.append({"page": page_no,
+                                       "reason": "access_restricted" if restricted else "page_unavailable",
+                                       "url": url})
+                        log(f'  !! {query} / {region["name"]} стр.{page_no}: {str(exc)[:100]}')
+                        if restricted:
+                            result["stop_reason"] = "access_restricted"
                         break
 
                     data = page.evaluate(EXTRACT_JS)
@@ -224,6 +228,12 @@ def collect(cfg: dict, pages: int) -> dict:
                     "errors": errors,
                 })
                 log(f'  [{mode}] {query} / {region["name"]}: снято {len(items)}')
+                if result.get("stop_reason"):
+                    result["queries_planned"] = len(modes) * len(cfg["regions"]) * len(cfg["queries"])
+                    result["queries_not_run"] = result["queries_planned"] - len(result["queries"])
+                    log("Доступ ограничен. Прекращаем запросы и сохраняем собранное.")
+                    ctx.close()
+                    return result
                 time.sleep(random.uniform(*PAUSE))
 
         ctx.close()
