@@ -44,6 +44,7 @@ class CollectorTests(unittest.TestCase):
         page = MagicMock()
         page.goto.side_effect = [MagicMock(status=200), MagicMock(status=429)]
         page.title.return_value = "Авито"
+        page.wait_for_selector.side_effect = [None, TimeoutError('no cards')]
         page.evaluate.return_value = {"total": 100, "items": [
             {"id": str(i), "title": "Инъектирование трещин", "position": i + 1}
             for i in range(50)]}
@@ -57,25 +58,27 @@ class CollectorTests(unittest.TestCase):
         with patch('playwright.sync_api.sync_playwright', return_value=manager), patch('collect.wait_until'):
             data = collect.collect(cfg, 2)
         self.assertEqual(page.goto.call_count, 2)
-        self.assertEqual(page.wait_for_selector.call_count, 1)
+        self.assertEqual(page.wait_for_selector.call_count, 2)
         self.assertEqual(len(data['queries'][0]['items']), 50)
         self.assertEqual(data['queries'][0]['status'], 'partial')
         self.assertEqual(data['stop_reason'], 'access_restricted')
         self.assertEqual(data['queries_not_run'], 15)
         ctx.close.assert_called_once()
 
-    def test_restriction_in_title_stops_before_wait(self):
+    def test_persistent_restriction_stops_after_wait(self):
         page = MagicMock()
         page.goto.return_value.status = 200
         page.title.return_value = "Доступ ограничен"
+        page.wait_for_selector.side_effect = TimeoutError("no cards")
         with self.assertRaises(collect.AccessRestricted):
             collect.load_listing_page(page, 'https://www.avito.ru/')
-        page.wait_for_selector.assert_not_called()
+        page.wait_for_selector.assert_called_once_with('[data-marker="item"]', state="visible", timeout=45000)
 
     def test_resume_starts_at_failed_page(self):
         page = MagicMock()
         page.goto.side_effect = [MagicMock(status=200), MagicMock(status=429)]
         page.title.return_value = "Авито"
+        page.wait_for_selector.side_effect = [None, TimeoutError('no cards')]
         page.evaluate.return_value = {"total": 100, "items": [
             {"id": str(i), "title": "Инъектирование", "position": i + 1} for i in range(50)]}
         ctx = MagicMock()
@@ -95,6 +98,7 @@ class CollectorTests(unittest.TestCase):
             page.goto.side_effect = None
             page.goto.return_value.status = 200
             page.evaluate.return_value = {"total": 100, "items": [{"id": "new", "title": "Инъектирование", "position": 1}]}
+            page.wait_for_selector.side_effect = None
             page.goto.reset_mock()
             data = collect.collect(cfg, 2, checkpoint, resume=True, interval=1800)
             self.assertEqual(page.goto.call_count, 1)
@@ -138,6 +142,7 @@ class CollectorTests(unittest.TestCase):
     def test_http_observation_on_restriction(self):
         page = MagicMock()
         page.goto.return_value.status = 429
+        page.wait_for_selector.side_effect = TimeoutError('no cards')
         page.goto.return_value.url = 'https://www.avito.ru/blocked'
         page.goto.return_value.headers = {'retry-after': '600'}
         observation = {}
@@ -145,7 +150,31 @@ class CollectorTests(unittest.TestCase):
             collect.load_listing_page(page, 'https://www.avito.ru/', observation)
         self.assertEqual(observation['http_status'], 429)
         self.assertEqual(observation['retry_after'], '600')
-        page.wait_for_selector.assert_not_called()
+        page.wait_for_selector.assert_called_once_with('[data-marker="item"]', state="visible", timeout=45000)
+
+    def test_intermediate_restriction_with_cards_is_success(self):
+        page = MagicMock()
+        page.goto.return_value.status = 439
+        page.goto.return_value.headers = {}
+        page.title.return_value = "Доступ ограничен: проверка безопасности"
+        observation = {}
+        collect.load_listing_page(page, 'https://www.avito.ru/', observation)
+        self.assertTrue(observation['listing_ready'])
+        page.goto.assert_called_once()
+        page.wait_for_selector.assert_called_once_with('[data-marker="item"]', state="visible", timeout=45000)
+
+    def test_browser_waits_for_delayed_cards_after_439(self):
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True, executable_path=os.environ.get('COLLECTOR_BROWSER') or None)
+            page = browser.new_page()
+            page.route('https://example.test/**', lambda route: route.fulfill(status=439, content_type='text/html', body='''<title>Доступ ограничен: проверка безопасности</title><body>Проверка пройдена, перенаправление…
+                <script>setTimeout(() => { document.title = 'Объявления'; document.body.innerHTML = '<div data-marker="item">Карточка</div>'; }, 200);</script></body>'''))
+            observation = {}
+            collect.load_listing_page(page, 'https://example.test/search', observation)
+            self.assertTrue(observation['listing_ready'])
+            self.assertEqual(observation['http_status'], 439)
+            self.assertEqual(page.title(), 'Объявления')
+            browser.close()
 
     def test_extract_real_dom(self):
         with sync_playwright() as pw:

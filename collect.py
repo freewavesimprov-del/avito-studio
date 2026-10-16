@@ -37,13 +37,19 @@ def load_listing_page(page, url: str, observation: dict | None = None) -> None:
     if response is not None:
         observation.update({"http_status": response.status, "response_url": response.url,
                             "retry_after": response.headers.get("retry-after")})
-    if (response is not None and response.status in (403, 429)) or _blocked(page):
-        raise AccessRestricted("access_restricted")
+    # Начальный статус и заголовок могут относиться к промежуточной проверке.
+    # Ждём штатное перенаправление сайта без reload/goto и повторных запросов.
+    if (response is not None and response.status in (403, 429, 439)) or _blocked(page):
+        log("Промежуточная страница проверки. Ждём карточки до 45 секунд…")
     try:
-        page.wait_for_selector('[data-marker="item"]', timeout=25000)
+        page.wait_for_selector('[data-marker="item"]', state="visible", timeout=45000)
+        observation["listing_ready"] = True
     except Exception:
+        observation["listing_ready"] = False
         if _blocked(page):
-            raise AccessRestricted("access_restricted") from None
+            raise AccessRestricted("access_restricted_after_wait") from None
+        if response is not None and response.status in (403, 429, 439):
+            raise AccessRestricted("listing_unavailable_after_restricted_response") from None
         raise
 
 
