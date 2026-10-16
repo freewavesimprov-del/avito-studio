@@ -54,7 +54,7 @@ class CollectorTests(unittest.TestCase):
         manager = MagicMock()
         manager.__enter__.return_value = pw
         cfg = collect.load_config()
-        with patch('playwright.sync_api.sync_playwright', return_value=manager), patch('collect.time.sleep'):
+        with patch('playwright.sync_api.sync_playwright', return_value=manager), patch('collect.wait_until'):
             data = collect.collect(cfg, 2)
         self.assertEqual(page.goto.call_count, 2)
         self.assertEqual(page.wait_for_selector.call_count, 1)
@@ -71,6 +71,45 @@ class CollectorTests(unittest.TestCase):
         with self.assertRaises(collect.AccessRestricted):
             collect.load_listing_page(page, 'https://www.avito.ru/')
         page.wait_for_selector.assert_not_called()
+
+    def test_resume_starts_at_failed_page(self):
+        page = MagicMock()
+        page.goto.side_effect = [MagicMock(status=200), MagicMock(status=429)]
+        page.title.return_value = "Авито"
+        page.evaluate.return_value = {"total": 100, "items": [
+            {"id": str(i), "title": "Инъектирование", "position": i + 1} for i in range(50)]}
+        ctx = MagicMock()
+        ctx.pages = [page]
+        pw = MagicMock()
+        pw.chromium.launch_persistent_context.return_value = ctx
+        manager = MagicMock()
+        manager.__enter__.return_value = pw
+        cfg = {**collect.load_config(), "queries": ["инъектирование"], "collect_by_date": False}
+        with tempfile.TemporaryDirectory() as temp, patch('playwright.sync_api.sync_playwright', return_value=manager), patch('collect.wait_until') as wait:
+            checkpoint = Path(temp) / 'progress.json'
+            data = collect.collect(cfg, 2, checkpoint, interval=900)
+            self.assertEqual(len(data['queries'][0]['items']), 50)
+            saved = json.loads(checkpoint.read_text())
+            self.assertEqual(saved['page'], 2)
+            self.assertGreater(wait.call_args.args[0], saved['last_request'] + 899)
+            page.goto.side_effect = None
+            page.goto.return_value.status = 200
+            page.evaluate.return_value = {"total": 100, "items": [{"id": "new", "title": "Инъектирование", "position": 1}]}
+            page.goto.reset_mock()
+            data = collect.collect(cfg, 2, checkpoint, resume=True, interval=1800)
+            self.assertEqual(page.goto.call_count, 1)
+            self.assertIn('&p=2', page.goto.call_args.args[0])
+            wait.assert_called_with(saved['last_request'] + 1800)
+            self.assertEqual(len(data['queries'][0]['items']), 51)
+            self.assertEqual(data['queries'][0]['status'], 'ok')
+            self.assertNotIn('stop_reason', data)
+            with self.assertRaises(ValueError):
+                collect.collect(cfg, 3, checkpoint, resume=True)
+
+    def test_long_wait_is_interruptible(self):
+        with patch('collect.time.time', side_effect=[0, 0, 0, 30, 30, 60, 60, 90]), patch('collect.time.sleep') as sleep:
+            collect.wait_until(90)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [30, 30, 30])
 
     def test_extract_real_dom(self):
         with sync_playwright() as pw:

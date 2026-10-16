@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
-import random
 import re
-import sys
 import time
 import urllib.parse
 from datetime import datetime
@@ -20,8 +19,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "queries.json"
 
-# Паузы ограничивают частоту запросов; доступность сайта не гарантируется.
-PAUSE = (7.0, 14.0)
 # Локальный постоянный профиль браузера.
 PROFILE = HERE / ".browser-profile"
 
@@ -152,12 +149,50 @@ def _blocked(page) -> bool:
         return False
 
 
-def collect(cfg: dict, pages: int) -> dict:
+def write_checkpoint(path: Path | None, state: dict) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.replace(path)
+
+
+def wait_until(timestamp: float) -> None:
+    remaining = timestamp - time.time()
+    if remaining > 0:
+        log(f"Следующий запрос не раньше чем через {remaining / 60:.1f} мин. Ctrl+C — остановить.")
+    while timestamp > time.time():
+        time.sleep(min(30, timestamp - time.time()))
+
+
+def collect(cfg: dict, pages: int, checkpoint: Path | None = None,
+            resume: bool = False, interval: float = 900) -> dict:
     from playwright.sync_api import sync_playwright
 
-    ours = {str(x) for x in (cfg.get("our_item_ids") or [])}
-    result = {"collected_at": datetime.now().isoformat(timespec="seconds"),
-              "queries": []}
+    modes = [("ranked", "")]
+    if cfg.get("collect_by_date", True):
+        modes.append(("by_date", "&s=104"))
+    for lo, hi in cfg.get("price_bands") or []:
+        modes.append((f"band_{lo}_{hi or 'plus'}", f"&s=104&pmin={lo}" + (f"&pmax={hi}" if hi else "")))
+    plan = [(mode, suffix, region, query) for mode, suffix in modes
+            for region in cfg["regions"] for query in cfg["queries"]]
+    signature = hashlib.sha256(json.dumps([plan, pages, cfg.get("category_path")],
+                                          ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    state = {"signature": signature, "block": 0, "page": 1, "last_request": 0,
+             "result": {"collected_at": datetime.now().isoformat(timespec="seconds"), "queries": []}}
+    if resume:
+        if checkpoint is None:
+            raise ValueError("Для продолжения нужен checkpoint")
+        state = json.loads(checkpoint.read_text(encoding="utf-8"))
+        if state.get("signature") != signature:
+            raise ValueError("План изменился: восстановите queries.json и --pages или начните новый сбор")
+    result = state["result"]
+    result.pop("stop_reason", None)
+    result.pop("queries_not_run", None)
+    result["queries_planned"] = len(plan)
+    if state["block"] >= len(plan):
+        return result
 
     with sync_playwright() as pw:
         # Режим браузера задаётся в queries.json. Ограничения доступа не обходим.
@@ -171,72 +206,60 @@ def collect(cfg: dict, pages: int) -> dict:
         )
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
 
-        # Сортировки храним отдельно; они не гарантируют случайную выборку.
-        modes: list[tuple[str, str]] = [("ranked", "")]
-        if cfg.get("collect_by_date", True):
-            modes.append(("by_date", "&s=104"))
-        for lo, hi in cfg.get("price_bands") or []:
-            band = f"&pmin={lo}" + (f"&pmax={hi}" if hi else "")
-            modes.append((f"band_{lo}_{hi or 'plus'}", "&s=104" + band))
-
-        for mode, sort_suffix in modes:
-          for region in cfg["regions"]:
-            for query in cfg["queries"]:
-                items: list[dict] = []
-                total = None
-                errors = []
-                for page_no in range(1, pages + 1):
-                    url = (f'https://www.avito.ru/{region["slug"]}/'
-                           f'{cfg.get("category_path", "predlozheniya_uslug")}'
-                           f'?q={urllib.parse.quote(query)}&p={page_no}{sort_suffix}')
-                    try:
-                        load_listing_page(page, url)
-                    except Exception as exc:
-                        restricted = isinstance(exc, AccessRestricted)
-                        errors.append({"page": page_no,
-                                       "reason": "access_restricted" if restricted else "page_unavailable",
-                                       "url": url})
-                        log(f'  !! {query} / {region["name"]} стр.{page_no}: {str(exc)[:100]}')
-                        if restricted:
-                            result["stop_reason"] = "access_restricted"
-                        break
-
+        try:
+            while state["block"] < len(plan):
+                index = state["block"]
+                mode, suffix, region, query = plan[index]
+                if len(result["queries"]) <= index:
+                    result["queries"].append({"query": query, "region": region["name"],
+                        "region_slug": region["slug"], "mode": mode, "items": [],
+                        "total": None, "status": "partial", "errors": [], "our_positions": {}})
+                block = result["queries"][index]
+                page_no = state["page"]
+                wait_until(state["last_request"] + interval if state["last_request"] else 0)
+                url = (f'https://www.avito.ru/{region["slug"]}/'
+                       f'{cfg.get("category_path", "predlozheniya_uslug")}'
+                       f'?q={urllib.parse.quote(query)}&p={page_no}{suffix}')
+                state["last_request"] = time.time()
+                write_checkpoint(checkpoint, state)
+                try:
+                    load_listing_page(page, url)
                     data = page.evaluate(EXTRACT_JS)
-                    if total is None:
-                        total = data.get("total")
-                    batch = enrich_items(data.get("items") or [])
-                    existing = {i["id"] for i in items}
-                    fresh = [i for i in batch if i["id"] not in existing]
-                    for item in fresh:
-                        item["position"] += (page_no - 1) * 50
-                    if batch and not fresh:
-                        break
-                    items.extend(fresh)
-                    log(f'  {query} / {region["name"]} стр.{page_no}: '
-                        f'{len(batch)} карточек, всего в категории {total}')
-                    if len(batch) < 20:
-                        break
-                    time.sleep(random.uniform(*PAUSE))
-
-                positions = {i["id"]: i["position"] for i in items if i["id"] in ours}
-                result["queries"].append({
-                    "query": query, "region": region["name"],
-                    "region_slug": region["slug"], "total": total,
-                    "mode": mode,
-                    "our_positions": positions, "items": items,
-                    "status": "partial" if errors and items else "failed" if errors else "ok",
-                    "errors": errors,
-                })
-                log(f'  [{mode}] {query} / {region["name"]}: снято {len(items)}')
-                if result.get("stop_reason"):
-                    result["queries_planned"] = len(modes) * len(cfg["regions"]) * len(cfg["queries"])
-                    result["queries_not_run"] = result["queries_planned"] - len(result["queries"])
-                    log("Доступ ограничен. Прекращаем запросы и сохраняем собранное.")
-                    ctx.close()
+                except Exception as exc:
+                    reason = "access_restricted" if isinstance(exc, AccessRestricted) else "page_unavailable"
+                    block["errors"].append({"page": page_no, "reason": reason, "url": url,
+                                            "at": datetime.now().isoformat(timespec="seconds")})
+                    block["status"] = "partial" if block["items"] else "failed"
+                    result["stop_reason"] = reason
+                    result["queries_not_run"] = len(plan) - len(result["queries"])
+                    write_checkpoint(checkpoint, state)
+                    log(f"Остановлено: {reason}. Прогресс сохранён; автоматических повторов нет.")
                     return result
-                time.sleep(random.uniform(*PAUSE))
-
-        ctx.close()
+                batch = enrich_items(data.get("items") or [])
+                existing = {item["id"] for item in block["items"]}
+                fresh = []
+                for item in batch:
+                    if item["id"] not in existing:
+                        existing.add(item["id"])
+                        item["position"] += (page_no - 1) * 50
+                        fresh.append(item)
+                block["items"].extend(fresh)
+                block["total"] = data.get("total")
+                block["our_positions"] = {i["id"]: i["position"] for i in block["items"]
+                                          if i["id"] in {str(x) for x in cfg.get("our_item_ids", [])}}
+                block["errors"] = []
+                block["last_success_at"] = datetime.now().isoformat(timespec="seconds")
+                log(f"{query} / {region['name']} [{mode}] стр.{page_no}: {len(batch)} карточек")
+                if page_no >= pages or len(batch) < 20 or not fresh:
+                    block["status"] = "ok"
+                    state["block"] += 1
+                    state["page"] = 1
+                else:
+                    block["status"] = "partial"
+                    state["page"] += 1
+                write_checkpoint(checkpoint, state)
+        finally:
+            ctx.close()
     return result
 
 
@@ -271,18 +294,24 @@ def main() -> None:
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--gap", type=int, default=60, help="минут между обходами")
     ap.add_argument("--output-dir", type=Path, default=HERE / "results")
+    ap.add_argument("--interval", type=float, default=900, help="секунд между началами запросов; по умолчанию 900")
+    ap.add_argument("--resume", action="store_true", help="продолжить из checkpoint")
+    ap.add_argument("--checkpoint", type=Path, help="по умолчанию output-dir/progress.json")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--dry", action="store_true", help="совместимость: результаты всегда локальные")
     args = ap.parse_args()
-    if args.pages < 1 or args.repeat < 1 or args.gap < 0:
-        ap.error("pages и repeat должны быть положительными; gap >= 0")
+    if args.pages < 1 or args.repeat < 1 or args.gap < 0 or not 1 <= args.interval < float("inf"):
+        ap.error("pages и repeat должны быть положительными; gap >= 0; interval >= 1")
     cfg = load_config(args.config)
     if args.headless:
         cfg["headless"] = True
     for run in range(args.repeat):
         if run:
             time.sleep(args.gap * 60)
-        payload = collect(cfg, args.pages)
+        checkpoint = args.checkpoint or args.output_dir / "progress.json"
+        if run == 0 and checkpoint.exists() and not args.resume:
+            ap.error("Checkpoint уже существует: используйте --resume либо другой --output-dir")
+        payload = collect(cfg, args.pages, checkpoint, args.resume and run == 0, args.interval)
         paths = save_results(payload, args.output_dir)
         log("Сохранено: " + ", ".join(str(p) for p in paths))
         if any(b.get("status") != "ok" for b in payload["queries"]):
