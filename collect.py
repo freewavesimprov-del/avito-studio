@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
 import urllib.parse
 from datetime import datetime
@@ -27,8 +28,15 @@ class AccessRestricted(RuntimeError):
     """Сайт явно запретил доступ: дальнейшие запросы прекращаем."""
 
 
-def load_listing_page(page, url: str) -> None:
+def load_listing_page(page, url: str, observation: dict | None = None) -> None:
+    if observation is None:
+        observation = {}
+    observation.update({"requested_url": url, "http_status": None, "response_url": None,
+                        "retry_after": None})
     response = page.goto(url, wait_until="domcontentloaded", timeout=45000)
+    if response is not None:
+        observation.update({"http_status": response.status, "response_url": response.url,
+                            "retry_after": response.headers.get("retry-after")})
     if (response is not None and response.status in (403, 429)) or _blocked(page):
         raise AccessRestricted("access_restricted")
     try:
@@ -37,6 +45,40 @@ def load_listing_page(page, url: str) -> None:
         if _blocked(page):
             raise AccessRestricted("access_restricted") from None
         raise
+
+
+def save_diagnostics(page, directory: Path, observation: dict, exc: Exception) -> Path:
+    """Сохраняем только локально: без cookies, заголовков авторизации и HTML."""
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = "diagnostic-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    data = {**observation, "at": datetime.now().isoformat(timespec="seconds"),
+            "error_type": type(exc).__name__, "error": str(exc)[:1500]}
+    for key, getter in (("final_url", lambda: page.url), ("title", page.title)):
+        try:
+            data[key] = getter()
+        except Exception as error:
+            data[key] = None
+            data[key + "_error"] = str(error)[:200]
+    screenshot = directory / (stem + ".png")
+    try:
+        page.screenshot(path=str(screenshot), full_page=False, timeout=10000)
+        data["screenshot"] = screenshot.name
+    except Exception as error:
+        data["screenshot_error"] = str(error)[:300]
+    path = directory / (stem + ".json")
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    log(f"Диагностика: {path}")
+    return path
+
+
+def inspect_browser() -> None:
+    if not sys.stdin.isatty():
+        log("Терминал неинтерактивный: ожидание осмотра пропущено.")
+        return
+    try:
+        input("Осмотрите страницу в Chromium. Enter — закрыть браузер и завершить. Повторного запроса не будет. ")
+    except (EOFError, KeyboardInterrupt):
+        pass
 
 
 def log(msg: str) -> None:
@@ -167,7 +209,8 @@ def wait_until(timestamp: float) -> None:
 
 
 def collect(cfg: dict, pages: int, checkpoint: Path | None = None,
-            resume: bool = False, interval: float = 900) -> dict:
+            resume: bool = False, interval: float = 900,
+            diagnostics_dir: Path | None = None, diagnose: bool = False) -> dict:
     from playwright.sync_api import sync_playwright
 
     modes = [("ranked", "")]
@@ -222,8 +265,9 @@ def collect(cfg: dict, pages: int, checkpoint: Path | None = None,
                        f'?q={urllib.parse.quote(query)}&p={page_no}{suffix}')
                 state["last_request"] = time.time()
                 write_checkpoint(checkpoint, state)
+                observation = {}
                 try:
-                    load_listing_page(page, url)
+                    load_listing_page(page, url, observation)
                     data = page.evaluate(EXTRACT_JS)
                 except Exception as exc:
                     reason = "access_restricted" if isinstance(exc, AccessRestricted) else "page_unavailable"
@@ -232,7 +276,15 @@ def collect(cfg: dict, pages: int, checkpoint: Path | None = None,
                     block["status"] = "partial" if block["items"] else "failed"
                     result["stop_reason"] = reason
                     result["queries_not_run"] = len(plan) - len(result["queries"])
+                    if diagnostics_dir is not None:
+                        try:
+                            path = save_diagnostics(page, diagnostics_dir, observation, exc)
+                            block["errors"][-1]["diagnostic_file"] = str(path)
+                        except Exception as diagnostic_error:
+                            log(f"Не удалось сохранить диагностику: {diagnostic_error}")
                     write_checkpoint(checkpoint, state)
+                    if diagnose and not cfg.get("headless", False):
+                        inspect_browser()
                     log(f"Остановлено: {reason}. Прогресс сохранён; автоматических повторов нет.")
                     return result
                 batch = enrich_items(data.get("items") or [])
@@ -297,21 +349,39 @@ def main() -> None:
     ap.add_argument("--interval", type=float, default=900, help="секунд между началами запросов; по умолчанию 900")
     ap.add_argument("--resume", action="store_true", help="продолжить из checkpoint")
     ap.add_argument("--checkpoint", type=Path, help="по умолчанию output-dir/progress.json")
+    ap.add_argument("--pilot", action="store_true", help="один запрос, первый регион, одна страница, только ranked")
+    ap.add_argument("--query", help="запрос для --pilot; по умолчанию первый из queries.json")
+    ap.add_argument("--diagnose", action="store_true", help="оставить видимый браузер открытым при ошибке до Enter")
     ap.add_argument("--headless", action="store_true")
     ap.add_argument("--dry", action="store_true", help="совместимость: результаты всегда локальные")
     args = ap.parse_args()
     if args.pages < 1 or args.repeat < 1 or args.gap < 0 or not 1 <= args.interval < float("inf"):
         ap.error("pages и repeat должны быть положительными; gap >= 0; interval >= 1")
+    if args.query and not args.pilot:
+        ap.error("--query применяется вместе с --pilot")
+    if args.query is not None and not args.query.strip():
+        ap.error("--query не должен быть пустым")
     cfg = load_config(args.config)
+    if args.pilot:
+        if args.repeat != 1:
+            ap.error("--pilot выполняет только один запрос; уберите --repeat")
+        cfg = {**cfg, "queries": [args.query.strip() if args.query else cfg["queries"][0]],
+               "regions": cfg["regions"][:1], "collect_by_date": False, "price_bands": []}
+        args.pages = 1
+        if args.output_dir == HERE / "results" and not args.resume and not args.checkpoint:
+            args.output_dir = HERE / "results" / ("pilot-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
     if args.headless:
         cfg["headless"] = True
+    if args.diagnose and cfg.get("headless", False):
+        ap.error("--diagnose требует видимого браузера: уберите --headless и headless: true из настроек")
     for run in range(args.repeat):
         if run:
             time.sleep(args.gap * 60)
         checkpoint = args.checkpoint or args.output_dir / "progress.json"
         if run == 0 and checkpoint.exists() and not args.resume:
             ap.error("Checkpoint уже существует: используйте --resume либо другой --output-dir")
-        payload = collect(cfg, args.pages, checkpoint, args.resume and run == 0, args.interval)
+        payload = collect(cfg, args.pages, checkpoint, args.resume and run == 0, args.interval,
+                          args.output_dir / "diagnostics", args.diagnose)
         paths = save_results(payload, args.output_dir)
         log("Сохранено: " + ", ".join(str(p) for p in paths))
         if any(b.get("status") != "ok" for b in payload["queries"]):

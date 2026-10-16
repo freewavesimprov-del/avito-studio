@@ -111,6 +111,42 @@ class CollectorTests(unittest.TestCase):
             collect.wait_until(90)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [30, 30, 30])
 
+    def test_pilot_uses_one_page_and_separate_output(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(collect, 'HERE', Path(temp)), patch('sys.argv', ['collect.py', '--pilot', '--diagnose']), patch('collect.collect', return_value={"queries": []}) as run:
+            collect.main()
+            cfg, pages, checkpoint, resume, interval, diagnostics, diagnose = run.call_args.args
+            self.assertEqual(pages, 1)
+            self.assertEqual(len(cfg['queries']), 1)
+            self.assertEqual(len(cfg['regions']), 1)
+            self.assertFalse(cfg['collect_by_date'])
+            self.assertEqual(cfg['price_bands'], [])
+            self.assertTrue(checkpoint.parent.name.startswith('pilot-'))
+            self.assertTrue(diagnose)
+
+    def test_diagnostics_survive_closed_browser(self):
+        page = MagicMock()
+        page.title.side_effect = RuntimeError('Browser closed')
+        page.screenshot.side_effect = RuntimeError('Browser closed')
+        page.url = 'https://www.avito.ru/'
+        with tempfile.TemporaryDirectory() as temp:
+            path = collect.save_diagnostics(page, Path(temp), {'http_status': 429}, collect.AccessRestricted('access_restricted'))
+            data = json.loads(path.read_text())
+            self.assertEqual(data['http_status'], 429)
+            self.assertIn('screenshot_error', data)
+            self.assertIsNone(data['title'])
+
+    def test_http_observation_on_restriction(self):
+        page = MagicMock()
+        page.goto.return_value.status = 429
+        page.goto.return_value.url = 'https://www.avito.ru/blocked'
+        page.goto.return_value.headers = {'retry-after': '600'}
+        observation = {}
+        with self.assertRaises(collect.AccessRestricted):
+            collect.load_listing_page(page, 'https://www.avito.ru/', observation)
+        self.assertEqual(observation['http_status'], 429)
+        self.assertEqual(observation['retry_after'], '600')
+        page.wait_for_selector.assert_not_called()
+
     def test_extract_real_dom(self):
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True, executable_path=os.environ.get('COLLECTOR_BROWSER') or None)
@@ -132,6 +168,11 @@ class CollectorTests(unittest.TestCase):
             self.assertEqual(a['price_unit'], 'linear_m')
             self.assertIsNone(b['price'])
             self.assertEqual(b['price_unit'], 'unspecified')
+            with tempfile.TemporaryDirectory() as temp:
+                report = collect.save_diagnostics(page, Path(temp), {"http_status": 200}, RuntimeError('fixture'))
+                diagnostic = json.loads(report.read_text())
+                self.assertEqual(diagnostic['http_status'], 200)
+                self.assertTrue((Path(temp) / diagnostic['screenshot']).is_file())
             browser.close()
 
 
