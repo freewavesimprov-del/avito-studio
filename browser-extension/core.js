@@ -95,6 +95,14 @@ export function searchScanSettings(input) {
   if(!["default","104"].includes(input.sort))throw Error("Неизвестная сортировка");
   return {firstPage,lastPage,interval,timeout,sort:input.sort};
 }
+const normalizedQuery=value=>String(value||"").trim().replace(/\s+/g," ").toLocaleLowerCase("ru");
+export function checkSearchCapture(capture,target) {
+  if(!capture||capture.kind!=="search")return {ok:false,reason:"На странице пока не распознана выдача"};
+  if(normalizedQuery(capture.query)!==normalizedQuery(target.query))return {ok:false,reason:`Открыт другой запрос: «${capture.query||"пустой запрос"}»`};
+  if(String(capture.page)!==String(target.page))return {ok:false,reason:`Открыта страница ${capture.page}, ожидалась ${target.page}`};
+  if(capture.sort!==target.sort)return {ok:false,reason:`Открыта другая сортировка: ${capture.sort}`};
+  return {ok:true,reason:""};
+}
 export function validateBackup(value) {
   if (!value || typeof value !== "object" || !Array.isArray(value.queries) || !Array.isArray(value.captures) || !value.listings || typeof value.listings !== "object") {
     throw Error("Файл не похож на полную JSON-копию расширения");

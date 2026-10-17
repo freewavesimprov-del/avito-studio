@@ -1,4 +1,4 @@
-import {mergeCapture, normalizeState, enabledQueries, searchPageURL, searchScanSettings} from './core.js';
+import {mergeCapture, normalizeState, enabledQueries, searchPageURL, searchScanSettings, checkSearchCapture} from './core.js';
 
 const $=id=>document.getElementById(id);
 let research=normalizeState((await chrome.storage.local.get('research')).research);
@@ -15,6 +15,7 @@ const log=text=>{const li=document.createElement('li');li.textContent=`${new Dat
 const targetKey=t=>`${t.query}\u0000${t.page}\u0000${t.sort}`;
 const captureKey=c=>`${c.query}\u0000${c.page}\u0000${c.sort}`;
 const closeWorker=async()=>{if(workerTabId&&await tabExists(workerTabId))try{await chrome.tabs.remove(workerTabId);}catch{}workerTabId=null;if(controllerTabId)try{await chrome.tabs.update(controllerTabId,{active:true});}catch{}};
+const bounded=(promise,milliseconds)=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Chrome не ответил на попытку прочитать страницу')),milliseconds);promise.then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});});
 
 function renderQueries(){
   $('queries').replaceChildren(...enabledQueries(research,'avito').map((query,index)=>{
@@ -40,16 +41,17 @@ async function waitBetween(seconds){
 async function waitForSearch(tabId,target,seconds){
   const deadline=Date.now()+seconds*1000;let lastError='Страница ещё загружается';
   while(Date.now()<deadline&&!stopRequested){
-    if(!await tabExists(tabId))throw Error('Рабочая вкладка была закрыта');
+    const tab=await tabExists(tabId);if(!tab)throw Error('Рабочая вкладка была закрыта');
+    const remaining=Math.max(1,Math.ceil((deadline-Date.now())/1000));
+    setStatus(`Ждём распознавание: ${target.query}, стр. ${target.page} · осталось ${remaining} сек. · ${lastError}`);
     try{
-      const result=await chrome.scripting.executeScript({target:{tabId},files:['capture.js']});
+      const result=await bounded(chrome.scripting.executeScript({target:{tabId},files:['capture.js']}),Math.min(4000,Math.max(500,deadline-Date.now())));
       const capture=result[0]?.result;
-      if(capture?.kind==='search'&&capture.query===target.query&&String(capture.page)===String(target.page)&&capture.sort===target.sort)return capture;
-      lastError='Сайт открыл другую страницу или выдача ещё не готова';
+      const check=checkSearchCapture(capture,target);if(check.ok)return capture;lastError=check.reason;
     }catch(error){lastError=error?.message||String(error);}
-    await sleep(1000);
+    await sleep(Math.min(1000,Math.max(1,deadline-Date.now())));
   }
-  if(stopRequested)throw Error('Остановлено пользователем');throw Error(lastError);
+  if(stopRequested)throw Error('Остановлено пользователем');throw Error(`${lastError}. Рабочая вкладка оставлена открытой — проверьте её и нажмите «Проверить снова» либо «Пропустить».`);
 }
 async function openCurrent(){
   if(!workerTabId||!await tabExists(workerTabId)){const tab=await chrome.tabs.create({url:current.url,active:true});workerTabId=tab.id;}
@@ -109,7 +111,7 @@ $('start').onclick=async()=>{
   }catch(error){setStatus(error?.message||String(error));}
 };
 $('pause').onclick=()=>{userPaused=!userPaused;$('pause').textContent=userPaused?'Продолжить':'Пауза';};
-$('stop').onclick=()=>{stopRequested=true;if(decision)decision('stop');};
+$('stop').onclick=async()=>{stopRequested=true;if(decision)decision('stop');await closeWorker();};
 $('retry').onclick=()=>{if(decision)decision('retry');};
 $('skip').onclick=()=>{if(decision)decision('skip');};
 $('selectAll').onclick=()=>[...$('queries').querySelectorAll('input')].forEach(x=>x.checked=true);
