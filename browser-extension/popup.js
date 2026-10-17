@@ -1,4 +1,4 @@
-import {fresh, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, validateBackup, csv} from './core.js';
+import {fresh, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, hasUsableDetail, validateBackup, csv} from './core.js';
 const $ = id => document.getElementById(id);
 let state = (await chrome.storage.local.get('research')).research || fresh();
 let limit = 40;
@@ -12,14 +12,14 @@ function row(title, subtitle, url, label='Открыть') {
 }
 function render() {
   const entries=Object.values(state.listings);
-  $('stats').textContent=`Объявлений: ${entries.length} · Полных карточек: ${entries.filter(l=>l.detail).length} · Сохранений выдачи: ${state.captures.filter(c=>c.kind==='search').length}`;
+  $('stats').textContent=`Объявлений: ${entries.length} · Полных карточек: ${entries.filter(hasUsableDetail).length} · Сохранений выдачи: ${state.captures.filter(c=>c.kind==='search').length}`;
   $('queryList').replaceChildren(...state.queries.map(q=>{
     const captures=state.captures.filter(c=>c.kind==='search' && c.query===q && c.region===state.region);
     const pages=[...new Set(captures.map(c=>`${c.page} (${c.sort})`))];
     return row(q, pages.length ? `Сохранены страницы: ${pages.join(', ')}` : 'Ещё не сохранено',searchURL(q,state.region));
   }));
-  const list=entries.filter(l=>!$('pendingOnly').checked || !l.detail);
-  $('listingList').replaceChildren(...list.slice(0,limit).map(l=>row((l.detail||l.card).title, l.detail ? `Карточка сохранена; не найдены поля: ${l.detail.missingFields.join(', ') || 'нет'}` : 'Есть только выдача',l.url)));
+  const list=entries.filter(l=>!$('pendingOnly').checked || !hasUsableDetail(l));
+  $('listingList').replaceChildren(...list.slice(0,limit).map(l=>{const detail=hasUsableDetail(l)?l.detail:null;return row((detail||l.card).title, detail ? `Карточка сохранена; не найдены поля: ${detail.missingFields.join(', ') || 'нет'}` : 'Есть только выдача',l.url);}));
   $('more').hidden=list.length<=limit;
 }
 $('region').value=state.region;$('queries').value=state.queries.join('\n');render();
@@ -63,7 +63,7 @@ $('importJSON').onchange=async event=>{
     const file=event.target.files?.[0];
     if(!file)return;
     const restored=validateBackup(JSON.parse(await file.text()));
-    const details=Object.values(restored.listings).filter(x=>x.detail).length;
+    const details=Object.values(restored.listings).filter(hasUsableDetail).length;
     if(!confirm(`Заменить текущие данные? В копии: ${Object.keys(restored.listings).length} объявлений, подробных карточек: ${details}, сохранений: ${restored.captures.length}.`))return;
     await chrome.storage.local.set({research:restored});state=restored;
     $('region').value=state.region;$('queries').value=state.queries.join('\n');render();message('JSON-копия восстановлена.');

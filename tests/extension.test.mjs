@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fresh, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
+import {fresh, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, hasUsableDetail, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
 const card = {id:'123',title:'Инъектирование',url:'https://www.avito.ru/moskva/uslugi/injection_123',price:null,position:1};
 const capture = (query,kind='search') => ({kind,captureId:query,at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q='+encodeURIComponent(query),query,region:'moskva_i_mo',page:'1',sort:'default',items:[card]});
 test('different queries preserve observations but share a unique listing',()=>{
@@ -57,4 +57,11 @@ test('search scan URLs and settings preserve page and sort',()=>{
   assert.throws(()=>searchScanSettings({firstPage:4,lastPage:2,interval:15,timeout:60,sort:'default'}));
   const empty={kind:'search',captureId:'empty',at:'2026-10-17T12:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q=x&p=9',query:'x',region:'moskva_i_mo',page:'9',sort:'default',items:[]};
   assert.equal(mergeCapture(fresh(),empty).captures.length,1);
+});
+test('unavailable legacy details return to pending queue',()=>{
+  const state=mergeCapture(fresh(),capture('поиск'));
+  state.listings['123'].detail={...card,title:'Объявление не посмотреть'};
+  assert.equal(hasUsableDetail(state.listings['123']),false);
+  assert.deepEqual(pendingListings(state).map(x=>x.id),['123']);
+  assert.equal(listingRows(state)[0].detail_saved,false);
 });

@@ -1,4 +1,4 @@
-import {mergeCapture, pendingListings, automationSettings} from './core.js';
+import {mergeCapture, pendingListings, automationSettings, hasUsableDetail} from './core.js';
 
 const $ = id => document.getElementById(id);
 let research = (await chrome.storage.local.get('research')).research;
@@ -35,7 +35,7 @@ const closeWorker = async () => {
 function refreshSummary() {
   const entries=Object.values(research?.listings || {});
   const pending=pendingListings(research || {listings:{}}).length;
-  $('summary').textContent=`Уникальных объявлений: ${entries.length} · Подробно сохранено: ${entries.filter(x=>x.detail).length} · В очереди: ${pending}`;
+  $('summary').textContent=`Уникальных объявлений: ${entries.length} · Подробно сохранено: ${entries.filter(hasUsableDetail).length} · В очереди: ${pending}`;
   const total=queue.length || 1;
   $('bar').style.width=`${Math.min(100,100*(completed+skipped)/total)}%`;
 }

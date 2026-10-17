@@ -29,15 +29,19 @@ export function mergeCapture(state, capture) {
 export function observations(state) {
   return state.captures.filter(c => c.kind === "search").flatMap(c => c.items.map(i => ({capture_id: c.captureId, captured_at: c.at, query: c.query, region: c.region, page: c.page, sort: c.sort, search_url: c.url, id: i.id, position_on_page: i.position, title: i.title, price: i.price, price_text: i.priceText, price_unit: i.priceUnit, promoted: i.promoted, url: i.url})));
 }
+export function hasUsableDetail(listing) {
+  return Boolean(listing?.detail && !/объявление не посмотреть/i.test(listing.detail.title || ""));
+}
 export function listingRows(state) {
   return Object.values(state.listings).map(l => {
-    const r = l.detail || l.card;
-    return {id: l.id, title: r.title, url: l.url, description: l.detail?.description ?? "", price: r.price, price_text: r.priceText, price_unit: r.priceUnit, price_from: r.priceFrom, seller: r.seller, seller_url: r.sellerURL, location: r.location, parameters: l.detail?.parametersText ?? "", images: (l.detail?.images || []).join("\n"), detail_saved: Boolean(l.detail), first_seen: l.firstSeen, last_seen: l.lastSeen, detail_at: l.detailAt ?? "", card_text: l.card?.rawText ?? ""};
+    const detail=hasUsableDetail(l) ? l.detail : null;
+    const r = detail || l.card;
+    return {id: l.id, title: r.title, url: l.url, description: detail?.description ?? "", price: r.price, price_text: r.priceText, price_unit: r.priceUnit, price_from: r.priceFrom, seller: r.seller, seller_url: r.sellerURL, location: r.location, parameters: detail?.parametersText ?? "", images: (detail?.images || []).join("\n"), detail_saved: Boolean(detail), first_seen: l.firstSeen, last_seen: l.lastSeen, detail_at: detail ? (l.detailAt ?? "") : "", card_text: l.card?.rawText ?? ""};
   });
 }
 export function pendingListings(state) {
   return Object.values(state.listings)
-    .filter(listing => !listing.detail && avitoURL(listing.url))
+    .filter(listing => !hasUsableDetail(listing) && avitoURL(listing.url))
     .sort((a, b) => String(a.firstSeen || "").localeCompare(String(b.firstSeen || "")));
 }
 export function automationSettings(input) {
@@ -85,7 +89,7 @@ export function csv(rows, columns) {
 export function sellerRows(state) {
   const groups=new Map();
   for(const listing of Object.values(state.listings)) {
-    const row=listing.detail || listing.card;
+    const row=hasUsableDetail(listing) ? listing.detail : listing.card;
     const url=row.sellerURL || listing.card?.sellerURL;
     if(!url) continue;
     const group=groups.get(url) || {seller_url:url,seller:row.seller || listing.card?.seller || '',listing_ids:[],titles:[]};
