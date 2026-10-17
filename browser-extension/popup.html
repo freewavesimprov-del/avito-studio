@@ -2,8 +2,21 @@
 <body><header><h1>Исследование услуг</h1><p>Сохраняйте открытые страницы Авито. Данные остаются в этом браузере.</p></header>
 <button id="capture" class="primary">Сохранить открытую страницу</button><p id="message" role="status" aria-live="polite"></p>
 <div id="stats"></div>
-<nav><button id="searchTab">Запросы</button><button id="detailTab">Объявления</button><button id="exportTab">Выгрузка</button></nav>
-<section id="search"><label>Регион (slug Авито)<input id="region" value="moskva_i_mo"></label><label>Запросы — по одному на строке<textarea id="queries" rows="5"></textarea></label><button id="saveSettings">Сохранить список</button> <button id="searchAutomation" class="primary">Автоматически собрать страницы</button><div id="queryList"></div><p class="hint">Откройте запрос, дождитесь карточек, нажмите значок расширения и «Сохранить». Либо используйте автоматический сбор страниц с отдельной вкладкой управления.</p></section>
+<nav><button id="searchTab">Запросы</button><button id="wordstatTab">Wordstat</button><button id="detailTab">Объявления</button><button id="exportTab">Выгрузка</button></nav>
+<section id="search"><label>Регион Авито (slug)<input id="region" value="moskva_i_mo"></label><label>Общий каталог фраз — по одной на строке<textarea id="queries" rows="5"></textarea></label><button id="saveSettings">Сохранить список</button> <button id="searchAutomation" class="primary">Автоматически собрать страницы</button><div class="query-head"><b>Фраза</b><span>Авито</span><span>Wordstat</span><span></span></div><div id="queryList"></div><p class="hint">Переключатели задают, где использовать каждую фразу. Автосбор выдачи получает только отмеченные запросы Авито; сбор Wordstat — только отмеченные запросы Wordstat.</p></section>
+<section id="wordstat" hidden>
+  <h2>Yandex Wordstat</h2>
+  <p class="hint">Используется Wordstat v2 в Yandex Cloud. Ключ хранится отдельно в локальном хранилище Chrome и не попадает в JSON/CSV.</p>
+  <label>API-ключ Yandex Cloud<input id="wordstatKey" type="password" autocomplete="off" placeholder="AQVN…"></label>
+  <label>Folder ID каталога Yandex Cloud<input id="wordstatFolder" autocomplete="off" placeholder="b1g…"></label>
+  <div class="inline-fields"><label>ID регионов Wordstat<input id="wordstatRegions" value="1"></label><label>Фраз на исходный запрос<input id="wordstatLimit" type="number" min="1" max="2000" value="50"></label></div>
+  <button id="saveWordstat">Сохранить доступ</button> <button id="removeWordstat">Удалить ключ</button> <button id="checkWordstat">Проверить</button> <button id="collectWordstat" class="primary">Получить спрос и подсказки</button>
+  <p id="wordstatStatus" role="status" aria-live="polite"></p>
+  <h3>Спрос по общим запросам</h3><div id="wordstatSeeds"></div>
+  <div class="suggestion-title"><h3>Новые фразы</h3><button id="addSuggestions">Добавить выбранные в общий каталог</button></div>
+  <p class="hint">Подсказки не запускают сбор Авито автоматически. Выберите подходящие фразы, добавьте их и включите канал Авито во вкладке «Запросы».</p>
+  <div id="wordstatSuggestions"></div>
+</section>
 <section id="detail" hidden><label><input id="pendingOnly" type="checkbox" checked> Только без полной карточки</label><button id="automation" class="primary">Автоматически собрать очередь</button><div id="listingList"></div><button id="more">Показать ещё</button><p class="hint">Автосбор открывается в отдельной вкладке управления. В ручном режиме откройте объявление и сохраните его тем же способом. Выгружаются только доступные в загруженной странице данные.</p></section>
 <section id="export" hidden><p>JSON содержит все сохранённые страницы и карточки. CSV подходят для Excel. Уникальные объявления связаны с наблюдениями через ID.</p><button id="json">Полная копия JSON</button><button id="listingsCSV">Объявления CSV</button><button id="observationsCSV">Выдача CSV</button><button id="sellersCSV">Исполнители CSV</button><label>Восстановить полную JSON-копию<input id="importJSON" type="file" accept="application/json,.json"></label><p class="hint">Импорт полностью заменяет локальные данные после подтверждения. CSV импортировать нельзя.</p><p>Делайте резервную копию JSON: удаление расширения удаляет его локальное хранилище.</p></section>
 <script type="module" src="popup.js"></script></body></html>

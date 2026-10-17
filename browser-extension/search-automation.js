@@ -1,7 +1,7 @@
-import {mergeCapture, searchPageURL, searchScanSettings} from './core.js';
+import {mergeCapture, normalizeState, enabledQueries, searchPageURL, searchScanSettings} from './core.js';
 
 const $=id=>document.getElementById(id);
-let research=(await chrome.storage.local.get('research')).research;
+let research=normalizeState((await chrome.storage.local.get('research')).research);
 let controllerTabId=(await chrome.tabs.getCurrent())?.id;
 let workerTabId=null,queue=[],current=null,settings=null,decision=null;
 let completed=0,skipped=0,stopRequested=false,userPaused=false;
@@ -17,7 +17,7 @@ const captureKey=c=>`${c.query}\u0000${c.page}\u0000${c.sort}`;
 const closeWorker=async()=>{if(workerTabId&&await tabExists(workerTabId))try{await chrome.tabs.remove(workerTabId);}catch{}workerTabId=null;if(controllerTabId)try{await chrome.tabs.update(controllerTabId,{active:true});}catch{}};
 
 function renderQueries(){
-  $('queries').replaceChildren(...(research?.queries||[]).map((query,index)=>{
+  $('queries').replaceChildren(...enabledQueries(research,'avito').map((query,index)=>{
     const label=document.createElement('label');
     const input=document.createElement('input');input.type='checkbox';input.checked=true;input.value=query;input.id=`query-${index}`;
     label.append(input,document.createTextNode(query));return label;
@@ -57,7 +57,7 @@ async function openCurrent(){
 }
 async function save(capture){
   capture.scanId=settings.scanId;
-  const stored=(await chrome.storage.local.get('research')).research||research;
+  const stored=normalizeState((await chrome.storage.local.get('research')).research||research);
   research=mergeCapture(stored,capture);await chrome.storage.local.set({research});
 }
 function waitForDecision(error){$('problem').hidden=false;$('problemText').textContent=error;setStatus('Сбор приостановлен: проверьте рабочую вкладку.');return new Promise(resolve=>{decision=resolve;});}
@@ -89,7 +89,7 @@ async function run(){
   }finally{
     await closeWorker();$('start').disabled=false;$('pause').disabled=true;$('stop').disabled=true;$('pause').textContent='Пауза';userPaused=false;
     setStatus(stopRequested?`Остановлено. Сохранено ${completed}, пропущено ${skipped}.`:`Серия завершена. Сохранено ${completed}, пропущено ${skipped}.`);
-    research=(await chrome.storage.local.get('research')).research||research;refresh();
+    research=normalizeState((await chrome.storage.local.get('research')).research||research);refresh();
   }
 }
 

@@ -1,5 +1,35 @@
 export const DEFAULT_QUERIES = ["инъекционная гидроизоляция", "гидроизоляционное инъектирование", "инъектирование трещин", "инъектирование швов", "инъектирование фундамента", "инъектирование подвала", "устранение течей в подвале", "отсечная гидроизоляция"];
-export const fresh = () => ({version: 1, queries: DEFAULT_QUERIES, region: "moskva_i_mo", listings: {}, captures: []});
+const defaultQueryMeta = () => ({avito: true, wordstat: true, cluster: "ядро", source: "preset"});
+export const fresh = () => normalizeState({version: 2, queries: [...DEFAULT_QUERIES], region: "moskva_i_mo", listings: {}, captures: []});
+export function normalizeState(value) {
+  const source=value && typeof value==="object" ? value : {};
+  const queries=[...new Set((Array.isArray(source.queries)?source.queries:DEFAULT_QUERIES).map(q=>String(q).trim()).filter(Boolean))];
+  const oldMeta=source.queryMeta && typeof source.queryMeta==="object" ? source.queryMeta : {};
+  const queryMeta={};
+  for(const query of queries){
+    const meta=oldMeta[query] && typeof oldMeta[query]==="object" ? oldMeta[query] : {};
+    queryMeta[query]={...defaultQueryMeta(),...meta,avito:meta.avito!==false,wordstat:meta.wordstat!==false,cluster:String(meta.cluster||"ядро"),source:String(meta.source||"manual")};
+  }
+  return {...source,version:2,queries,queryMeta,region:typeof source.region==="string"?source.region:"moskva_i_mo",listings:source.listings&&typeof source.listings==="object"?source.listings:{},captures:Array.isArray(source.captures)?source.captures:[]};
+}
+export function enabledQueries(state, channel) {
+  const normalized=normalizeState(state);
+  if(!["avito","wordstat"].includes(channel))throw Error("Неизвестный источник запросов");
+  return normalized.queries.filter(query=>normalized.queryMeta[query]?.[channel]!==false);
+}
+export function updateQueries(state, queries) {
+  const normalized=normalizeState(state);
+  const clean=[...new Set(queries.map(q=>String(q).trim()).filter(Boolean))];
+  if(!clean.length)throw Error("Введите хотя бы один запрос");
+  const queryMeta={};
+  for(const query of clean)queryMeta[query]=normalized.queryMeta[query]||{...defaultQueryMeta(),source:"manual"};
+  return {...normalized,queries:clean,queryMeta};
+}
+export function setQueryMeta(state, query, patch) {
+  const normalized=normalizeState(state);
+  if(!normalized.queries.includes(query))throw Error("Запрос не найден");
+  return {...normalized,queryMeta:{...normalized.queryMeta,[query]:{...normalized.queryMeta[query],...patch}}};
+}
 export function avitoURL(value) {
   try {const u = new URL(value); return u.protocol === "https:" && (u.hostname === "avito.ru" || u.hostname === "www.avito.ru");} catch {return false;}
 }

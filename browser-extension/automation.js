@@ -1,7 +1,7 @@
-import {mergeCapture, pendingListings, automationSettings, hasUsableDetail} from './core.js';
+import {mergeCapture, normalizeState, pendingListings, automationSettings, hasUsableDetail} from './core.js';
 
 const $ = id => document.getElementById(id);
-let research = (await chrome.storage.local.get('research')).research;
+let research = normalizeState((await chrome.storage.local.get('research')).research);
 let queue = [];
 let current = null;
 let workerTabId = null;
@@ -59,7 +59,7 @@ async function waitForDetail(tabId, listing, seconds) {
 }
 
 async function saveCapture(capture) {
-  const stored=(await chrome.storage.local.get('research')).research || research;
+  const stored=normalizeState((await chrome.storage.local.get('research')).research || research);
   const next=mergeCapture(stored,capture);
   await chrome.storage.local.set({research:next});
   research=next;
@@ -131,7 +131,7 @@ async function run() {
     $('start').disabled=false;$('pause').disabled=true;$('stop').disabled=true;$('pause').textContent='Пауза';
     userPaused=false;
     setStatus(stopRequested ? `Остановлено. Сохранено ${completed}, пропущено ${skipped}.` : `Серия завершена. Сохранено ${completed}, пропущено ${skipped}.`);
-    research=(await chrome.storage.local.get('research')).research || research;
+    research=normalizeState((await chrome.storage.local.get('research')).research || research);
     refreshSummary();
   }
 }

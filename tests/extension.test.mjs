@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fresh, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, hasUsableDetail, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
+import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, hasUsableDetail, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
+import {parseRegionIds, wordstatSettings, fetchTopRequests, wordstatCandidates, WORDSTAT_URL} from '../browser-extension/wordstat.js';
 const card = {id:'123',title:'Инъектирование',url:'https://www.avito.ru/moskva/uslugi/injection_123',price:null,position:1};
 const capture = (query,kind='search') => ({kind,captureId:query,at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q='+encodeURIComponent(query),query,region:'moskva_i_mo',page:'1',sort:'default',items:[card]});
 test('different queries preserve observations but share a unique listing',()=>{
@@ -64,4 +65,33 @@ test('unavailable legacy details return to pending queue',()=>{
   assert.equal(hasUsableDetail(state.listings['123']),false);
   assert.deepEqual(pendingListings(state).map(x=>x.id),['123']);
   assert.equal(listingRows(state)[0].detail_saved,false);
+});
+test('legacy backups gain a query catalog without losing data',()=>{
+  const legacy={version:1,queries:['первый','второй','первый'],region:'moskva_i_mo',listings:{},captures:[]};
+  let state=normalizeState(legacy);
+  assert.deepEqual(state.queries,['первый','второй']);
+  assert.deepEqual(enabledQueries(state,'avito'),['первый','второй']);
+  state=setQueryMeta(state,'второй',{avito:false});
+  assert.deepEqual(enabledQueries(state,'avito'),['первый']);
+  state=updateQueries(state,['второй','новый']);
+  assert.equal(state.queryMeta['второй'].avito,false);
+  assert.equal(state.queryMeta['новый'].source,'manual');
+});
+test('Wordstat settings and response use the Yandex Cloud v2 contract',async()=>{
+  const settings=wordstatSettings({apiKey:'secret',folderId:'folder',regionIds:'1, 213;1',numPhrases:'50'});
+  assert.deepEqual(settings.regionIds,['1','213']);
+  let request;
+  const result=await fetchTopRequests(settings,'гидроизоляция',async(url,options)=>{request={url,options};return new Response(JSON.stringify({totalCount:'123',results:[{phrase:'гидроизоляция подвала',count:'45'}],associations:[]}),{status:200});});
+  assert.equal(request.url,WORDSTAT_URL);
+  assert.equal(request.options.headers.Authorization,'Api-Key secret');
+  assert.deepEqual(JSON.parse(request.options.body).regions,['1','213']);
+  assert.equal(result.totalCount,123);
+  assert.equal(result.results[0].count,45);
+  assert.throws(()=>parseRegionIds('Москва'));
+});
+test('Wordstat suggestions exclude catalog phrases and merge duplicates',()=>{
+  const suggestions=wordstatCandidates({results:{a:{results:[{phrase:'Новая фраза',count:10},{phrase:'ядро',count:99}],associations:[]},b:{results:[{phrase:'новая фраза',count:20}],associations:[]}}},['ядро']);
+  assert.equal(suggestions.length,1);
+  assert.equal(suggestions[0].count,20);
+  assert.equal(suggestions[0].seeds,2);
 });

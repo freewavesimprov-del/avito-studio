@@ -9,7 +9,7 @@ with sync_playwright() as pw:
     page.add_init_script('''
       const db = {};
       window.chrome = {
-        storage: {local: {get: async () => structuredClone(db), set: async value => Object.assign(db, structuredClone(value))}},
+        storage: {local: {get: async () => structuredClone(db), set: async value => Object.assign(db, structuredClone(value)), remove: async key => delete db[key]}},
         tabs: {query: async () => [{id:1,url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q=инъектирование'}],create:async x=>x},
         scripting: {executeScript: async () => [{result:{kind:'search',captureId:'fixture',at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q=инъектирование',region:'moskva_i_mo',page:'1',sort:'default',query:'инъектирование',items:[{id:'123',url:'https://www.avito.ru/moskva/uslugi/inject_123',title:'Инъектирование швов',position:1,price:null,seller:'Компания',sellerURL:'https://www.avito.ru/user/company'}]}}]}
       };
@@ -20,6 +20,7 @@ with sync_playwright() as pw:
         content_type={'js':'application/javascript','html':'text/html','css':'text/css'}.get(file.suffix[1:],'text/plain')
         route.fulfill(body=file.read_text(),content_type=content_type+'; charset=utf-8')
     page.route('https://extension.test/**',serve)
+    page.route('https://searchapi.api.cloud.yandex.net/**',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps({'totalCount':'321','results':[{'phrase':'инъектирование бетона','count':'87'}],'associations':[]})))
     page.goto('https://extension.test/popup.html')
     page.locator('#capture').click()
     page.locator('#message').filter(has_text='Сохранено 1').wait_for()
@@ -43,8 +44,21 @@ with sync_playwright() as pw:
     page.locator('#searchTab').click()
     page.locator('#queries').fill('Инъектирование трещин\nИнъектирование трещин\nГидроизоляция')
     page.locator('#saveSettings').click()
-    page.locator('#message').filter(has_text='Список сохранён').wait_for()
-    assert page.locator('#queryList .row').count()==2
+    page.locator('#message').filter(has_text='Общий каталог сохранён').wait_for()
+    assert page.locator('#queryList .query-row').count()==2
+    page.locator('#wordstatTab').click()
+    page.locator('#wordstatKey').fill('secret-key')
+    page.locator('#wordstatFolder').fill('folder-id')
+    page.locator('#wordstatLimit').fill('10')
+    page.locator('#collectWordstat').click()
+    page.locator('#wordstatStatus').filter(has_text='Готово').wait_for()
+    assert '321' in page.locator('#wordstatSeeds').inner_text()
+    assert 'инъектирование бетона' in page.locator('#wordstatSuggestions').inner_text()
+    page.locator('#exportTab').click()
+    with page.expect_download() as download:
+        page.locator('#json').click()
+    exported=Path(download.value.path()).read_text()
+    assert 'secret-key' not in exported and 'folder-id' not in exported
     page.screenshot(path='/tmp/avito-extension-popup.png',full_page=True)
     browser.close()
 print('Popup interactions, settings, JSON and seller CSV downloads passed (Chrome API mocked)')
