@@ -34,6 +34,12 @@ with sync_playwright() as pw:
     with page.expect_download() as download:
         page.locator('#sellersCSV').click()
     assert 'Компания' in Path(download.value.path()).read_text(encoding='utf-8-sig')
+    restored=backup.copy()
+    restored['listings']['456']={'id':'456','url':'https://www.avito.ru/moskva/uslugi/second_456','firstSeen':'2026-10-17T09:00:00Z','lastSeen':'2026-10-17T09:00:00Z','card':{'id':'456','url':'https://www.avito.ru/moskva/uslugi/second_456','title':'Вторая карточка'}}
+    page.on('dialog',lambda dialog:dialog.accept())
+    page.locator('#importJSON').set_input_files({'name':'backup.json','mimeType':'application/json','buffer':json.dumps(restored).encode()})
+    page.locator('#message').filter(has_text='JSON-копия восстановлена').wait_for()
+    assert 'Объявлений: 2' in page.locator('#stats').inner_text()
     page.locator('#searchTab').click()
     page.locator('#queries').fill('Инъектирование трещин\nИнъектирование трещин\nГидроизоляция')
     page.locator('#saveSettings').click()

@@ -29,6 +29,33 @@ export function listingRows(state) {
     return {id: l.id, title: r.title, url: l.url, description: l.detail?.description ?? "", price: r.price, price_text: r.priceText, price_unit: r.priceUnit, price_from: r.priceFrom, seller: r.seller, seller_url: r.sellerURL, location: r.location, parameters: l.detail?.parametersText ?? "", images: (l.detail?.images || []).join("\n"), detail_saved: Boolean(l.detail), first_seen: l.firstSeen, last_seen: l.lastSeen, detail_at: l.detailAt ?? "", card_text: l.card?.rawText ?? ""};
   });
 }
+export function pendingListings(state) {
+  return Object.values(state.listings)
+    .filter(listing => !listing.detail && avitoURL(listing.url))
+    .sort((a, b) => String(a.firstSeen || "").localeCompare(String(b.firstSeen || "")));
+}
+export function automationSettings(input) {
+  const interval = Number(input.interval);
+  const timeout = Number(input.timeout);
+  const limit = Number(input.limit);
+  if (!Number.isFinite(interval) || interval < 5 || interval > 3600) throw Error("Интервал должен быть от 5 до 3600 секунд");
+  if (!Number.isFinite(timeout) || timeout < 15 || timeout > 180) throw Error("Ожидание страницы должно быть от 15 до 180 секунд");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw Error("Размер серии должен быть от 1 до 500");
+  return {interval, timeout, limit};
+}
+export function validateBackup(value) {
+  if (!value || typeof value !== "object" || !Array.isArray(value.queries) || !Array.isArray(value.captures) || !value.listings || typeof value.listings !== "object") {
+    throw Error("Файл не похож на полную JSON-копию расширения");
+  }
+  if (!value.queries.every(q => typeof q === "string") || typeof value.region !== "string") throw Error("В копии повреждены настройки запросов");
+  for (const [id, listing] of Object.entries(value.listings)) {
+    if (!/^\d+$/.test(id) || listing?.id !== id || !avitoURL(listing?.url)) throw Error(`Некорректное объявление в копии: ${id}`);
+  }
+  for (const capture of value.captures) {
+    if (!capture || !["search", "detail"].includes(capture.kind) || !Array.isArray(capture.items) || !avitoURL(capture.url)) throw Error("В копии повреждена история сохранений");
+  }
+  return structuredClone(value);
+}
 export function csv(rows, columns) {
   const cell = v => {
     let s = v == null ? "" : String(v);

@@ -1,4 +1,4 @@
-import {fresh, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, csv} from './core.js';
+import {fresh, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, validateBackup, csv} from './core.js';
 const $ = id => document.getElementById(id);
 let state = (await chrome.storage.local.get('research')).research || fresh();
 let limit = 40;
@@ -25,6 +25,7 @@ function render() {
 $('region').value=state.region;$('queries').value=state.queries.join('\n');render();
 for(const name of ['search','detail','export']) $(`${name}Tab`).onclick=()=>{for(const n of ['search','detail','export']) $(n).hidden=n!==name;};
 $('more').onclick=()=>{limit+=40;render();};$('pendingOnly').onchange=()=>{limit=40;render();};
+$('automation').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('automation.html')});
 $('saveSettings').onclick=async()=>{
   try {
     const queries=[...new Set($('queries').value.split('\n').map(s=>s.trim()).filter(Boolean))];
@@ -56,3 +57,14 @@ $('listingsCSV').onclick=()=>download(csv(listingRows(state),['id','title','url'
 $('observationsCSV').onclick=()=>download(csv(observations(state),['capture_id','captured_at','query','region','page','sort','search_url','id','position_on_page','title','price','price_text','price_unit','promoted','url']),`avito-searches-${stamp()}.csv`,'text/csv;charset=utf-8');
 
 $('sellersCSV').onclick=()=>download(csv(sellerRows(state),['seller_url','seller','listing_count','listing_ids','titles']),`avito-sellers-${stamp()}.csv`,'text/csv;charset=utf-8');
+$('importJSON').onchange=async event=>{
+  try {
+    const file=event.target.files?.[0];
+    if(!file)return;
+    const restored=validateBackup(JSON.parse(await file.text()));
+    const details=Object.values(restored.listings).filter(x=>x.detail).length;
+    if(!confirm(`Заменить текущие данные? В копии: ${Object.keys(restored.listings).length} объявлений, подробных карточек: ${details}, сохранений: ${restored.captures.length}.`))return;
+    await chrome.storage.local.set({research:restored});state=restored;
+    $('region').value=state.region;$('queries').value=state.queries.join('\n');render();message('JSON-копия восстановлена.');
+  }catch(error){message(error?.message || String(error),true);}finally{event.target.value='';}
+};

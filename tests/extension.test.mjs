@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fresh, mergeCapture, observations, listingRows, csv, searchURL, avitoURL} from '../browser-extension/core.js';
+import {fresh, mergeCapture, observations, listingRows, pendingListings, automationSettings, validateBackup, csv, searchURL, avitoURL} from '../browser-extension/core.js';
 const card = {id:'123',title:'Инъектирование',url:'https://www.avito.ru/moskva/uslugi/injection_123',price:null,position:1};
 const capture = (query,kind='search') => ({kind,captureId:query,at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q='+encodeURIComponent(query),query,region:'moskva_i_mo',page:'1',sort:'default',items:[card]});
 test('different queries preserve observations but share a unique listing',()=>{
@@ -29,4 +29,22 @@ test('only Avito HTTPS pages can be captured',()=>{
   assert.throws(()=>mergeCapture(fresh(),{...capture('x'),url:'https://example.test/'}));
   assert.throws(()=>searchURL('q','../../bad'));
   assert.equal(new URL(searchURL('швы & трещины','moskva_i_mo')).searchParams.get('q'),'швы & трещины');
+});
+test('automation queue contains only unique listings without details',()=>{
+  let state=mergeCapture(fresh(),capture('поиск'));
+  state.listings['999']={id:'999',url:'https://www.avito.ru/moskva/uslugi/detail_999',firstSeen:'2026-10-17T09:00:00Z',card:{title:'Сохранено'},detail:{title:'Сохранено'}};
+  state.listings['bad']={id:'bad',url:'https://example.test/bad',firstSeen:'2026-10-17T08:00:00Z',card:{title:'Чужой сайт'}};
+  assert.deepEqual(pendingListings(state).map(x=>x.id),['123']);
+  assert.deepEqual(automationSettings({interval:'15',timeout:'60',limit:25}),{interval:15,timeout:60,limit:25});
+  assert.throws(()=>automationSettings({interval:4,timeout:60,limit:25}));
+  assert.throws(()=>automationSettings({interval:15,timeout:10,limit:25}));
+  assert.throws(()=>automationSettings({interval:15,timeout:60,limit:501}));
+});
+test('full JSON backup is validated before restore',()=>{
+  const state=mergeCapture(fresh(),capture('поиск'));
+  const restored=validateBackup(state);
+  assert.notEqual(restored,state);
+  assert.equal(Object.keys(restored.listings).length,1);
+  assert.throws(()=>validateBackup({...state,listings:{'123':{...state.listings['123'],url:'https://example.test/'}}}));
+  assert.throws(()=>validateBackup({...state,captures:[{kind:'search',url:'javascript:bad',items:[]}]}));
 });
