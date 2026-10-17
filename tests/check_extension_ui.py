@@ -20,7 +20,7 @@ with sync_playwright() as pw:
         content_type={'js':'application/javascript','html':'text/html','css':'text/css'}.get(file.suffix[1:],'text/plain')
         route.fulfill(body=file.read_text(),content_type=content_type+'; charset=utf-8')
     page.route('https://extension.test/**',serve)
-    page.route('https://searchapi.api.cloud.yandex.net/**',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps({'totalCount':'321','results':[{'phrase':'инъектирование бетона','count':'87'}],'associations':[]})))
+    page.route('https://searchapi.api.cloud.yandex.net/**',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps({'totalCount':'321','results':[{'phrase':'инъектирование бетона','count':'87'}],'associations':[{'phrase':'подкожная инъекция','count':'3200'}]})))
     page.goto('https://extension.test/popup.html')
     page.locator('#capture').click()
     page.locator('#message').filter(has_text='Сохранено 1').wait_for()
@@ -54,6 +54,14 @@ with sync_playwright() as pw:
     page.locator('#wordstatStatus').filter(has_text='Готово').wait_for()
     assert '321' in page.locator('#wordstatSeeds').inner_text()
     assert 'инъектирование бетона' in page.locator('#wordstatSuggestions').inner_text()
+    assert page.locator('#wordstatSuggestions .suggestion-row').count()==2
+    page.locator('#suggestionExclude').fill('подкожная')
+    assert page.locator('#wordstatSuggestions .suggestion-row').count()==1
+    page.locator('#selectVisible').click()
+    assert 'выбрано: 1' in page.locator('#suggestionSummary').inner_text()
+    page.locator('#suggestionExclude').fill('')
+    assert page.locator('#wordstatSuggestions .suggestion-row').count()==2
+    assert page.locator('#wordstatSuggestions input:checked').count()==1
     page.locator('#exportTab').click()
     with page.expect_download() as download:
         page.locator('#json').click()

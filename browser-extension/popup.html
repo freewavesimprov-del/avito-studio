@@ -12,9 +12,19 @@
   <div class="inline-fields"><label>ID регионов Wordstat<input id="wordstatRegions" value="1"></label><label>Фраз на исходный запрос<input id="wordstatLimit" type="number" min="1" max="2000" value="50"></label></div>
   <button id="saveWordstat">Сохранить доступ</button> <button id="removeWordstat">Удалить ключ</button> <button id="checkWordstat">Проверить</button> <button id="collectWordstat" class="primary">Получить спрос и подсказки</button>
   <p id="wordstatStatus" role="status" aria-live="polite"></p>
-  <h3>Спрос по общим запросам</h3><div id="wordstatSeeds"></div>
+  <div class="suggestion-title"><h3>Спрос по общим запросам</h3><label class="compact">Порядок<select id="seedSort"><option value="catalog">Как в каталоге</option><option value="countDesc">Сначала популярные</option><option value="countAsc">Сначала редкие</option></select></label></div><div id="wordstatSeeds"></div>
   <div class="suggestion-title"><h3>Новые фразы</h3><button id="addSuggestions">Добавить выбранные в общий каталог</button></div>
   <p class="hint">Подсказки не запускают сбор Авито автоматически. Выберите подходящие фразы, добавьте их и включите канал Авито во вкладке «Запросы».</p>
+  <div class="suggestion-filters">
+    <label>Найти в фразе<input id="suggestionSearch" type="search" placeholder="например: фундамент"></label>
+    <label>Исключить слова<input id="suggestionExclude" placeholder="подкожная, hydra"></label>
+    <label>Частотность от<input id="suggestionMin" type="number" min="0" placeholder="0"></label>
+    <label>до<input id="suggestionMax" type="number" min="0" placeholder="без ограничения"></label>
+    <label>Источник<select id="suggestionKind"><option value="all">Все подсказки</option><option value="results">Содержат исходную фразу</option><option value="associations">Похожие запросы</option></select></label>
+    <label>Исходный запрос<select id="suggestionSeed"><option value="all">Все исходные запросы</option></select></label>
+    <label>Сортировка<select id="suggestionSort"><option value="countDesc">Частотность: по убыванию</option><option value="countAsc">Частотность: по возрастанию</option><option value="alpha">По алфавиту</option></select></label>
+  </div>
+  <div class="selection-tools"><span id="suggestionSummary"></span><span><button id="selectVisible">Выбрать показанные</button> <button id="clearSuggestions">Снять выбор</button></span></div>
   <div id="wordstatSuggestions"></div>
 </section>
 <section id="detail" hidden><label><input id="pendingOnly" type="checkbox" checked> Только без полной карточки</label><button id="automation" class="primary">Автоматически собрать очередь</button><div id="listingList"></div><button id="more">Показать ещё</button><p class="hint">Автосбор открывается в отдельной вкладке управления. В ручном режиме откройте объявление и сохраните его тем же способом. Выгружаются только доступные в загруженной странице данные.</p></section>

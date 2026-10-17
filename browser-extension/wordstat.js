@@ -39,11 +39,33 @@ export async function fetchTopRequests(settings, phrase, fetchImpl=fetch) {
 export function wordstatCandidates(wordstat, existingQueries=[]) {
   const existing=new Set(existingQueries.map(q=>q.toLocaleLowerCase("ru")));
   const aggregate=new Map();
-  for(const result of Object.values(wordstat?.results||{}))for(const row of [...(result.results||[]),...(result.associations||[])]){
-    const key=row.phrase.toLocaleLowerCase("ru");
-    if(existing.has(key))continue;
-    const current=aggregate.get(key)||{phrase:row.phrase,count:0,seeds:0};
-    current.count=Math.max(current.count,Number(row.count)||0);current.seeds++;aggregate.set(key,current);
+  const add=(row,kind,seed)=>{
+    const key=row.phrase.toLocaleLowerCase("ru");if(existing.has(key))return;
+    const current=aggregate.get(key)||{phrase:row.phrase,count:0,kinds:new Set(),seedQueries:new Set()};
+    current.count=Math.max(current.count,Number(row.count)||0);current.kinds.add(kind);current.seedQueries.add(seed);aggregate.set(key,current);
+  };
+  for(const [seed,result] of Object.entries(wordstat?.results||{})){
+    for(const row of result.results||[])add(row,"results",seed);
+    for(const row of result.associations||[])add(row,"associations",seed);
   }
-  return [...aggregate.values()].sort((a,b)=>b.count-a.count||b.seeds-a.seeds||a.phrase.localeCompare(b.phrase,"ru"));
+  return [...aggregate.values()].map(row=>({...row,kinds:[...row.kinds],seedQueries:[...row.seedQueries],seeds:row.seedQueries.size})).sort((a,b)=>b.count-a.count||b.seeds-a.seeds||a.phrase.localeCompare(b.phrase,"ru"));
+}
+
+const terms=value=>String(value||"").toLocaleLowerCase("ru").split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);
+export function filterWordstatCandidates(candidates, filters={}) {
+  const query=String(filters.query||"").trim().toLocaleLowerCase("ru");
+  const excluded=terms(filters.excluded);
+  const min=filters.min===""||filters.min==null?null:Number(filters.min);
+  const max=filters.max===""||filters.max==null?null:Number(filters.max);
+  const kind=filters.kind||"all";
+  const seed=filters.seed||"all";
+  const rows=candidates.filter(row=>{
+    const phrase=row.phrase.toLocaleLowerCase("ru");
+    return (!query||phrase.includes(query))&&!excluded.some(term=>phrase.includes(term))&&(min==null||row.count>=min)&&(max==null||row.count<=max)&&(kind==="all"||row.kinds.includes(kind))&&(seed==="all"||row.seedQueries.includes(seed));
+  });
+  const alpha=(a,b)=>a.phrase.localeCompare(b.phrase,"ru");
+  if(filters.sort==="countAsc")rows.sort((a,b)=>a.count-b.count||alpha(a,b));
+  else if(filters.sort==="alpha")rows.sort(alpha);
+  else rows.sort((a,b)=>b.count-a.count||alpha(a,b));
+  return rows;
 }

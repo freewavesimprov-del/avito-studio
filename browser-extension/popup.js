@@ -1,11 +1,12 @@
 import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, hasUsableDetail, validateBackup, csv} from './core.js';
-import {wordstatSettings, fetchTopRequests, wordstatCandidates} from './wordstat.js';
+import {wordstatSettings, fetchTopRequests, wordstatCandidates, filterWordstatCandidates} from './wordstat.js';
 
 const $ = id => document.getElementById(id);
 const stored=await chrome.storage.local.get(['research','wordstatCredentials']);
 let state=normalizeState(stored.research||fresh());
 let credentials=stored.wordstatCredentials||{};
 let limit=40;
+const selectedSuggestions=new Set();
 const message=(text,error=false)=>{$('message').textContent=text;$('message').style.color=error?'#a11d2c':'#006b66';};
 const wordstatMessage=(text,error=false)=>{$('wordstatStatus').textContent=text;$('wordstatStatus').style.color=error?'#a11d2c':'#006b66';};
 const saveState=async next=>{state=normalizeState(next);await chrome.storage.local.set({research:state});};
@@ -34,21 +35,37 @@ function renderQuery(query) {
 
 function renderWordstat() {
   const results=state.wordstat?.results||{};
-  $('wordstatSeeds').replaceChildren(...enabledQueries(state,'wordstat').map(query=>{
+  const seedQueries=enabledQueries(state,'wordstat');
+  if($('seedSort').value==='countDesc')seedQueries.sort((a,b)=>(results[b]?.totalCount||0)-(results[a]?.totalCount||0));
+  if($('seedSort').value==='countAsc')seedQueries.sort((a,b)=>(results[a]?.totalCount||0)-(results[b]?.totalCount||0));
+  $('wordstatSeeds').replaceChildren(...seedQueries.map(query=>{
     const div=document.createElement('div');div.className='seed-row';
     const name=document.createElement('span');name.textContent=query;
     const value=document.createElement('span');const result=results[query];value.textContent=result?Number(result.totalCount||0).toLocaleString('ru-RU'):'нет данных';
     div.append(name,value);return div;
   }));
-  const candidates=wordstatCandidates(state.wordstat,state.queries).slice(0,300);
-  $('wordstatSuggestions').replaceChildren(...candidates.map(candidate=>{
+  const allCandidates=wordstatCandidates(state.wordstat,state.queries);
+  const seedSelect=$('suggestionSeed');const selectedSeed=seedSelect.value;
+  seedSelect.replaceChildren(Object.assign(document.createElement('option'),{value:'all',textContent:'Все исходные запросы'}),...Object.keys(results).map(seed=>Object.assign(document.createElement('option'),{value:seed,textContent:seed})));
+  if([...seedSelect.options].some(option=>option.value===selectedSeed))seedSelect.value=selectedSeed;
+  const candidates=filterWordstatCandidates(allCandidates,{query:$('suggestionSearch').value,excluded:$('suggestionExclude').value,min:$('suggestionMin').value,max:$('suggestionMax').value,kind:$('suggestionKind').value,seed:seedSelect.value,sort:$('suggestionSort').value});
+  const visible=candidates.slice(0,500);
+  $('wordstatSuggestions').replaceChildren(...visible.map(candidate=>{
     const div=document.createElement('label');div.className='suggestion-row';
-    const input=document.createElement('input');input.type='checkbox';input.dataset.phrase=candidate.phrase;
+    const input=document.createElement('input');input.type='checkbox';input.dataset.phrase=candidate.phrase;input.checked=selectedSuggestions.has(candidate.phrase);input.onchange=()=>{if(input.checked)selectedSuggestions.add(candidate.phrase);else selectedSuggestions.delete(candidate.phrase);renderSuggestionSummary(candidates.length,allCandidates.length);};
     const text=document.createElement('span');text.textContent=candidate.phrase;
+    const kind=document.createElement('span');kind.className='suggestion-kind';kind.textContent=candidate.kinds.length>1?'уточнение + похожая':candidate.kinds[0]==='results'?'уточнение':'похожая';
     const count=document.createElement('small');count.textContent=Number(candidate.count).toLocaleString('ru-RU');
-    div.append(input,text,count);return div;
+    div.append(input,text,kind,count);return div;
   }));
-  $('addSuggestions').disabled=!candidates.length;
+  renderSuggestionSummary(candidates.length,allCandidates.length);
+  $('addSuggestions').disabled=!selectedSuggestions.size;
+}
+
+function renderSuggestionSummary(filtered,total){
+  const limited=filtered>500?' · видны первые 500':'';
+  $('suggestionSummary').textContent=`Показано: ${filtered} из ${total}${limited} · выбрано: ${selectedSuggestions.size}`;
+  $('addSuggestions').disabled=!selectedSuggestions.size;
 }
 
 function render() {
@@ -104,16 +121,19 @@ $('collectWordstat').onclick=async()=>{
       wordstatMessage(`Wordstat: ${index+1} из ${queries.length} — ${queries[index]}`);nextResults[queries[index]]=await fetchTopRequests(settings,queries[index]);
       await saveState({...state,wordstat:{...(state.wordstat||{}),updatedAt:new Date().toISOString(),regionIds:settings.regionIds,numPhrases:settings.numPhrases,results:nextResults}});renderWordstat();
     }
-    wordstatMessage(`Готово: получены данные для ${queries.length} запросов.`);
+    selectedSuggestions.clear();renderWordstat();wordstatMessage(`Готово: получены данные для ${queries.length} запросов.`);
   }catch(error){wordstatMessage(error.message||String(error),true);}finally{$('collectWordstat').disabled=false;}
 };
 $('addSuggestions').onclick=async()=>{
   try{
-    const selected=[...$('wordstatSuggestions').querySelectorAll('input:checked')].map(input=>input.dataset.phrase);if(!selected.length)throw Error('Выберите хотя бы одну новую фразу');
+    const selected=[...selectedSuggestions];if(!selected.length)throw Error('Выберите хотя бы одну новую фразу');
     let next=updateQueries(state,[...state.queries,...selected]);for(const query of selected)next=setQueryMeta(next,query,{avito:false,wordstat:true,cluster:'кандидат',source:'wordstat'});
-    await saveState(next);$('queries').value=state.queries.join('\n');render();wordstatMessage(`Добавлено фраз: ${selected.length}. Включите подходящие для Авито во вкладке «Запросы».`);
+    await saveState(next);selectedSuggestions.clear();$('queries').value=state.queries.join('\n');render();wordstatMessage(`Добавлено фраз: ${selected.length}. Включите подходящие для Авито во вкладке «Запросы».`);
   }catch(error){wordstatMessage(error.message,true);}
 };
+for(const id of ['seedSort','suggestionSearch','suggestionExclude','suggestionMin','suggestionMax','suggestionKind','suggestionSeed','suggestionSort'])$(id).oninput=renderWordstat;
+$('selectVisible').onclick=()=>{for(const input of $('wordstatSuggestions').querySelectorAll('input'))selectedSuggestions.add(input.dataset.phrase);renderWordstat();};
+$('clearSuggestions').onclick=()=>{selectedSuggestions.clear();renderWordstat();};
 
 function download(text,name,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 const stamp=()=>new Date().toISOString().replace(/[:.]/g,'-');

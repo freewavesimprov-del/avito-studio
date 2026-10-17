@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, hasUsableDetail, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
-import {parseRegionIds, wordstatSettings, fetchTopRequests, wordstatCandidates, WORDSTAT_URL} from '../browser-extension/wordstat.js';
+import {parseRegionIds, wordstatSettings, fetchTopRequests, wordstatCandidates, filterWordstatCandidates, WORDSTAT_URL} from '../browser-extension/wordstat.js';
 const card = {id:'123',title:'Инъектирование',url:'https://www.avito.ru/moskva/uslugi/injection_123',price:null,position:1};
 const capture = (query,kind='search') => ({kind,captureId:query,at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q='+encodeURIComponent(query),query,region:'moskva_i_mo',page:'1',sort:'default',items:[card]});
 test('different queries preserve observations but share a unique listing',()=>{
@@ -90,8 +90,14 @@ test('Wordstat settings and response use the Yandex Cloud v2 contract',async()=>
   assert.throws(()=>parseRegionIds('Москва'));
 });
 test('Wordstat suggestions exclude catalog phrases and merge duplicates',()=>{
-  const suggestions=wordstatCandidates({results:{a:{results:[{phrase:'Новая фраза',count:10},{phrase:'ядро',count:99}],associations:[]},b:{results:[{phrase:'новая фраза',count:20}],associations:[]}}},['ядро']);
-  assert.equal(suggestions.length,1);
-  assert.equal(suggestions[0].count,20);
-  assert.equal(suggestions[0].seeds,2);
+  const suggestions=wordstatCandidates({results:{a:{results:[{phrase:'Новая фраза',count:10},{phrase:'ядро',count:99}],associations:[{phrase:'Подкожная инъекция',count:3000}]},b:{results:[{phrase:'новая фраза',count:20}],associations:[]}}},['ядро']);
+  assert.equal(suggestions.length,2);
+  const merged=suggestions.find(x=>x.phrase.toLocaleLowerCase('ru')==='новая фраза');
+  assert.equal(merged.count,20);
+  assert.equal(merged.seeds,2);
+  assert.deepEqual(merged.kinds,['results']);
+  const filtered=filterWordstatCandidates(suggestions,{excluded:'подкожная, hydra',min:'5',max:'100',kind:'results',sort:'countAsc'});
+  assert.equal(filtered.length,1);
+  assert.equal(filtered[0].phrase.toLocaleLowerCase('ru'),'новая фраза');
+  assert.deepEqual(filterWordstatCandidates(suggestions,{seed:'b'}).map(x=>x.phrase.toLocaleLowerCase('ru')),['новая фраза']);
 });
