@@ -19,6 +19,12 @@ with sync_playwright() as pw:
     assert data['kind'] == 'search' and data['query'] == 'швы' and data['page'] == '2'
     assert data['items'][0]['priceUnit'] == 'linear_m' and data['items'][0]['priceFrom']
     assert data['items'][0]['sellerURL'] == 'https://www.avito.ru/user/profile1'
+    data = fixture('https://www.avito.ru/moskva_i_mo/remont_i_stroitelstvo/stroymaterialy/izolyaciya/gidroizolyaciya-ASgBAgICAUSmAbs?context=H4sIAAAAAAAA&p=2', '''
+    <input data-marker="search-form/suggest" value="отсечная гидроизоляция">
+    <h1>«Отсечная гидроизоляция»: объявления для Москвы</h1>
+    <article data-marker="item"><a data-marker="item-title" href="/moskva/remont_i_stroitelstvo/material_987"><h3 itemprop="name">Отсечная гидроизоляция</h3></a></article>''')
+    assert data['kind'] == 'search' and data['query'] == 'отсечная гидроизоляция' and data['page'] == '2'
+    assert data['items'][0]['id'] == '987'
     data = fixture('https://www.avito.ru/moskva/uslugi/shvy_123', '''<main><h1 itemprop="name">Инъектирование швов</h1>
     <div data-marker="item-view/item-price">Цена договорная</div><div itemprop="description">Герметизация швов. Гарантия по договору.</div>
     <div data-marker="item-view/item-params">Материал: бетон</div><div data-marker="item-view/item-address">Москва</div>

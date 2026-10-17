@@ -12,7 +12,7 @@
     <label><input id="skipExisting" type="checkbox" checked> Пропускать страницы, которые уже когда-либо сохранялись</label>
   </div>
   <p class="hint">Для первичного глубокого обхода оставьте пропуск сохранённых страниц включённым. Для нового дневного снимка страницы 1 отключите его. При пустой или короткой странице последующие страницы этого запроса пропускаются.</p>
-  <fieldset><legend>Запросы</legend><div id="queries" class="query-grid"></div><button id="selectAll">Выбрать все</button> <button id="selectNone">Снять все</button></fieldset>
+  <fieldset><legend>Запросы</legend><div id="queries" class="query-grid"></div><button id="selectAll">Выбрать все</button> <button id="selectNone">Снять все</button> <button id="reloadQueries">Обновить список</button></fieldset>
   <div class="controls"><button id="start" class="primary">Старт</button><button id="pause" disabled>Пауза</button><button id="stop" disabled>Стоп</button></div>
   <div class="progress"><div id="bar"></div></div><p id="status" role="status" aria-live="polite">Готово к запуску.</p>
   <div id="problem" hidden><h2>Страница не распознана</h2><p id="problemText"></p><p>Завершите проверку в рабочей вкладке и нажмите «Проверить снова», либо пропустите страницу.</p><div class="controls"><button id="retry" class="primary">Проверить снова</button><button id="skip">Пропустить</button></div></div>

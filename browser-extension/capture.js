@@ -20,9 +20,15 @@
     return {seller: name, sellerURL: a ? href(a) : ""};
   };
   const common = {captureId: crypto.randomUUID(), at: new Date().toISOString(), url: location.href, title: document.title};
+  const currentURL = new URL(location.href);
   const cards = [...document.querySelectorAll('[data-marker="item"]')].filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
   const listingId=idOf(location.href);
-  const isSearch=!listingId && /\/predlozheniya_uslug\/?$/.test(location.pathname);
+  const searchInput=find(document, 'input[data-marker="search-form/suggest"], input[name="q"], input[placeholder*="Поиск"]');
+  const headingQuery=text(find(document, 'h1')).match(/^[«"]([^»"]+)[»"]/)?.[1] || "";
+  const searchQuery=currentURL.searchParams.get("q") || searchInput?.value?.trim() || headingQuery;
+  // Авито может перенаправить текстовый поиск из раздела услуг в товарную
+  // категорию. Такая страница всё равно остаётся поисковой выдачей.
+  const isSearch=!listingId && (cards.length > 0 || Boolean(searchQuery) || /\/predlozheniya_uslug\/?$/.test(location.pathname));
   if (cards.length && isSearch) {
     const items = cards.map((el, index) => {
       const link = find(el, 'a[data-marker="item-title"]') || [...el.querySelectorAll('a[href]')].find(a => /_\d+(?:\?|$)/.test(a.getAttribute("href")));
@@ -34,12 +40,10 @@
         promoted: /Продвинуто|Реклама/i.test(rawText), rawText};
     }).filter(i => i.id && i.title);
     if (!items.length) throw Error("Карточки есть, но их ссылки не распознаны. Сохранение отменено.");
-    const u = new URL(location.href);
-    return {...common, kind: "search", query: u.searchParams.get("q") || "", region: u.pathname.split("/").filter(Boolean)[0] || "", page: u.searchParams.get("p") || "1", sort: u.searchParams.get("s") || "default", totalText: text(find(document, '[data-marker="page-title/count"]')), items};
+    return {...common, kind: "search", query: searchQuery, region: currentURL.pathname.split("/").filter(Boolean)[0] || "", page: currentURL.searchParams.get("p") || "1", sort: currentURL.searchParams.get("s") || "default", totalText: text(find(document, '[data-marker="page-title/count"]')), items};
   }
   if (isSearch && /ничего не найдено|нет объявлений|по вашему запросу ничего/i.test(text(document.body))) {
-    const u = new URL(location.href);
-    return {...common, kind:"search",query:u.searchParams.get("q")||"",region:u.pathname.split("/").filter(Boolean)[0]||"",page:u.searchParams.get("p")||"1",sort:u.searchParams.get("s")||"default",totalText:"0",items:[]};
+    return {...common, kind:"search",query:searchQuery,region:currentURL.pathname.split("/").filter(Boolean)[0]||"",page:currentURL.searchParams.get("p")||"1",sort:currentURL.searchParams.get("s")||"default",totalText:"0",items:[]};
   }
   const id = listingId;
   const title = text(find(document, '[data-marker="item-view/title-info"], h1[itemprop="name"], h1'));

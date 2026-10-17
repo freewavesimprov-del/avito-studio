@@ -4,7 +4,7 @@ const $=id=>document.getElementById(id);
 let research=normalizeState((await chrome.storage.local.get('research')).research);
 let controllerTabId=(await chrome.tabs.getCurrent())?.id;
 let workerTabId=null,queue=[],current=null,settings=null,decision=null;
-let completed=0,skipped=0,stopRequested=false,userPaused=false;
+let completed=0,skipped=0,stopRequested=false,userPaused=false,running=false;
 const endedQueries=new Set();
 if(controllerTabId)try{await chrome.tabs.update(controllerTabId,{autoDiscardable:false});}catch{}
 
@@ -25,6 +25,10 @@ function renderQueries(){
   }));
 }
 function selectedQueries(){return [...$('queries').querySelectorAll('input:checked')].map(x=>x.value);}
+async function reloadResearch(showMessage=false){
+  if(running)return;research=normalizeState((await chrome.storage.local.get('research')).research||research);renderQueries();refresh();
+  if(showMessage)setStatus(`Список обновлён: для Авито включено ${enabledQueries(research,'avito').length} фраз.`);
+}
 function refresh(){
   const searches=(research?.captures||[]).filter(c=>c.kind==='search');
   $('summary').textContent=`Сохранений выдачи: ${searches.length} · Уникальных объявлений: ${Object.keys(research?.listings||{}).length}`;
@@ -65,6 +69,7 @@ async function save(capture){
 function waitForDecision(error){$('problem').hidden=false;$('problemText').textContent=error;setStatus('Сбор приостановлен: проверьте рабочую вкладку.');return new Promise(resolve=>{decision=resolve;});}
 
 async function run(){
+  running=true;
   $('start').disabled=true;$('pause').disabled=false;$('stop').disabled=false;
   try{
     for(current of queue){
@@ -89,7 +94,7 @@ async function run(){
       if(!stopRequested&&completed+skipped<queue.length)await waitBetween(settings.interval);
     }
   }finally{
-    await closeWorker();$('start').disabled=false;$('pause').disabled=true;$('stop').disabled=true;$('pause').textContent='Пауза';userPaused=false;
+    await closeWorker();running=false;$('start').disabled=false;$('pause').disabled=true;$('stop').disabled=true;$('pause').textContent='Пауза';userPaused=false;
     setStatus(stopRequested?`Остановлено. Сохранено ${completed}, пропущено ${skipped}.`:`Серия завершена. Сохранено ${completed}, пропущено ${skipped}.`);
     research=normalizeState((await chrome.storage.local.get('research')).research||research);refresh();
   }
@@ -116,4 +121,7 @@ $('retry').onclick=()=>{if(decision)decision('retry');};
 $('skip').onclick=()=>{if(decision)decision('skip');};
 $('selectAll').onclick=()=>[...$('queries').querySelectorAll('input')].forEach(x=>x.checked=true);
 $('selectNone').onclick=()=>[...$('queries').querySelectorAll('input')].forEach(x=>x.checked=false);
+$('reloadQueries').onclick=()=>reloadResearch(true);
+chrome.storage.onChanged?.addListener((changes,area)=>{if(area==='local'&&changes.research&&!running)reloadResearch(true);});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!running)reloadResearch(false);});
 renderQueries();refresh();
