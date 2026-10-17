@@ -7,8 +7,14 @@ export function searchURL(query, region) {
   if (!/^[a-z0-9_]+$/.test(region)) throw Error("Регион должен быть slug Авито, например moskva_i_mo");
   return `https://www.avito.ru/${region}/predlozheniya_uslug?q=${encodeURIComponent(query)}`;
 }
+export function searchPageURL(query, region, page=1, sort="default") {
+  const url=new URL(searchURL(query,region));
+  url.searchParams.set("p",String(page));
+  if(sort!=="default")url.searchParams.set("s",String(sort));
+  return url.href;
+}
 export function mergeCapture(state, capture) {
-  if (!capture || !avitoURL(capture.url) || !["search", "detail"].includes(capture.kind) || !Array.isArray(capture.items) || !capture.items.length) throw Error("Нет распознанных карточек для сохранения");
+  if (!capture || !avitoURL(capture.url) || !["search", "detail"].includes(capture.kind) || !Array.isArray(capture.items) || (capture.kind === "detail" && !capture.items.length)) throw Error("Нет распознанных карточек для сохранения");
   const next = structuredClone(state);
   for (const row of capture.items) {
     if (!/^\d+$/.test(row.id) || !avitoURL(row.url)) throw Error("Некорректная ссылка на объявление");
@@ -42,6 +48,18 @@ export function automationSettings(input) {
   if (!Number.isFinite(timeout) || timeout < 15 || timeout > 180) throw Error("Ожидание страницы должно быть от 15 до 180 секунд");
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw Error("Размер серии должен быть от 1 до 500");
   return {interval, timeout, limit};
+}
+export function searchScanSettings(input) {
+  const firstPage=Number(input.firstPage);
+  const lastPage=Number(input.lastPage);
+  const interval=Number(input.interval);
+  const timeout=Number(input.timeout);
+  if(!Number.isInteger(firstPage) || firstPage<1 || firstPage>100)throw Error("Начальная страница должна быть от 1 до 100");
+  if(!Number.isInteger(lastPage) || lastPage<firstPage || lastPage>100)throw Error("Конечная страница должна быть не меньше начальной и не больше 100");
+  if(!Number.isFinite(interval) || interval<5 || interval>3600)throw Error("Интервал должен быть от 5 до 3600 секунд");
+  if(!Number.isFinite(timeout) || timeout<15 || timeout>180)throw Error("Ожидание страницы должно быть от 15 до 180 секунд");
+  if(!["default","104"].includes(input.sort))throw Error("Неизвестная сортировка");
+  return {firstPage,lastPage,interval,timeout,sort:input.sort};
 }
 export function validateBackup(value) {
   if (!value || typeof value !== "object" || !Array.isArray(value.queries) || !Array.isArray(value.captures) || !value.listings || typeof value.listings !== "object") {

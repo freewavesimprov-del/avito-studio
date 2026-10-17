@@ -28,9 +28,17 @@ with sync_playwright() as pw:
     assert data['items'][0]['description'].startswith('Герметизация')
     assert data['items'][0]['price'] is None and data['items'][0]['priceUnit'] == 'unspecified'
     assert data['items'][0]['images'] == ['https://images.example/photo.jpg']
+    assert data['items'][0]['rawText']
+    data = fixture('https://www.avito.ru/moskva/uslugi/price_789', '''<main><h1>Инъектирование</h1><div data-marker="item-view/item-price">от 5 500 ₽</div><div itemprop="description">Описание</div><div data-marker="item-view/item-params">Подробности</div></main>''')
+    assert data['items'][0]['price'] == 5500 and data['items'][0]['priceFrom']
     try:
         fixture('https://www.avito.ru/moskva/uslugi/shvy_123','<title>Доступ ограничен: проверка безопасности</title><h1>Проверка</h1>')
         raise AssertionError('Blocked page must not be saved')
+    except Exception as e:
+        assert 'ещё не распознаны' in str(e)
+    try:
+        fixture('https://www.avito.ru/moskva/uslugi/unavailable_456','<h1>Объявление не посмотреть</h1>')
+        raise AssertionError('Unavailable page must not be saved as details')
     except Exception as e:
         assert 'ещё не распознаны' in str(e)
     browser.close()

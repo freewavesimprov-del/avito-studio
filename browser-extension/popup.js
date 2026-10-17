@@ -26,6 +26,7 @@ $('region').value=state.region;$('queries').value=state.queries.join('\n');rende
 for(const name of ['search','detail','export']) $(`${name}Tab`).onclick=()=>{for(const n of ['search','detail','export']) $(n).hidden=n!==name;};
 $('more').onclick=()=>{limit+=40;render();};$('pendingOnly').onchange=()=>{limit=40;render();};
 $('automation').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('automation.html')});
+$('searchAutomation').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('search-automation.html')});
 $('saveSettings').onclick=async()=>{
   try {
     const queries=[...new Set($('queries').value.split('\n').map(s=>s.trim()).filter(Boolean))];

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fresh, mergeCapture, observations, listingRows, pendingListings, automationSettings, validateBackup, csv, searchURL, avitoURL} from '../browser-extension/core.js';
+import {fresh, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
 const card = {id:'123',title:'Инъектирование',url:'https://www.avito.ru/moskva/uslugi/injection_123',price:null,position:1};
 const capture = (query,kind='search') => ({kind,captureId:query,at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q='+encodeURIComponent(query),query,region:'moskva_i_mo',page:'1',sort:'default',items:[card]});
 test('different queries preserve observations but share a unique listing',()=>{
@@ -47,4 +47,14 @@ test('full JSON backup is validated before restore',()=>{
   assert.equal(Object.keys(restored.listings).length,1);
   assert.throws(()=>validateBackup({...state,listings:{'123':{...state.listings['123'],url:'https://example.test/'}}}));
   assert.throws(()=>validateBackup({...state,captures:[{kind:'search',url:'javascript:bad',items:[]}]}));
+});
+test('search scan URLs and settings preserve page and sort',()=>{
+  const url=new URL(searchPageURL('трещины & швы','moskva_i_mo',4,'104'));
+  assert.equal(url.searchParams.get('q'),'трещины & швы');
+  assert.equal(url.searchParams.get('p'),'4');
+  assert.equal(url.searchParams.get('s'),'104');
+  assert.deepEqual(searchScanSettings({firstPage:'1',lastPage:'4',interval:'15',timeout:'60',sort:'default'}),{firstPage:1,lastPage:4,interval:15,timeout:60,sort:'default'});
+  assert.throws(()=>searchScanSettings({firstPage:4,lastPage:2,interval:15,timeout:60,sort:'default'}));
+  const empty={kind:'search',captureId:'empty',at:'2026-10-17T12:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q=x&p=9',query:'x',region:'moskva_i_mo',page:'9',sort:'default',items:[]};
+  assert.equal(mergeCapture(fresh(),empty).captures.length,1);
 });
