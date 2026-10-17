@@ -1,0 +1,9 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Исследование Авито</title><link rel="stylesheet" href="popup.css"></head>
+<body><header><h1>Исследование услуг</h1><p>Сохраняйте открытые страницы Авито. Данные остаются в этом браузере.</p></header>
+<button id="capture" class="primary">Сохранить открытую страницу</button><p id="message" role="status" aria-live="polite"></p>
+<div id="stats"></div>
+<nav><button id="searchTab">Запросы</button><button id="detailTab">Объявления</button><button id="exportTab">Выгрузка</button></nav>
+<section id="search"><label>Регион (slug Авито)<input id="region" value="moskva_i_mo"></label><label>Запросы — по одному на строке<textarea id="queries" rows="5"></textarea></label><button id="saveSettings">Сохранить список</button><div id="queryList"></div><p class="hint">Откройте запрос, дождитесь карточек, нажмите значок расширения и «Сохранить». Следующую страницу открывайте на сайте. Номер страницы сохраняется из адреса.</p></section>
+<section id="detail" hidden><label><input id="pendingOnly" type="checkbox" checked> Только без полной карточки</label><div id="listingList"></div><button id="more">Показать ещё</button><p class="hint">Откройте объявление и сохраните его тем же способом. Открывайте нужные разделы и прокручивайте страницу перед сохранением: выгружаются только доступные в загруженной странице данные.</p></section>
+<section id="export" hidden><p>JSON содержит все сохранённые страницы и карточки. CSV подходят для Excel. Уникальные объявления связаны с наблюдениями через ID.</p><button id="json">Полная копия JSON</button><button id="listingsCSV">Объявления CSV</button><button id="observationsCSV">Выдача CSV</button><button id="sellersCSV">Исполнители CSV</button><p>Делайте резервную копию JSON: удаление расширения удаляет его локальное хранилище.</p></section>
+<script type="module" src="popup.js"></script></body></html>

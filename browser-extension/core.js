@@ -1,0 +1,50 @@
+export const DEFAULT_QUERIES = ["инъекционная гидроизоляция", "гидроизоляционное инъектирование", "инъектирование трещин", "инъектирование швов", "инъектирование фундамента", "инъектирование подвала", "устранение течей в подвале", "отсечная гидроизоляция"];
+export const fresh = () => ({version: 1, queries: DEFAULT_QUERIES, region: "moskva_i_mo", listings: {}, captures: []});
+export function avitoURL(value) {
+  try {const u = new URL(value); return u.protocol === "https:" && (u.hostname === "avito.ru" || u.hostname === "www.avito.ru");} catch {return false;}
+}
+export function searchURL(query, region) {
+  if (!/^[a-z0-9_]+$/.test(region)) throw Error("Регион должен быть slug Авито, например moskva_i_mo");
+  return `https://www.avito.ru/${region}/predlozheniya_uslug?q=${encodeURIComponent(query)}`;
+}
+export function mergeCapture(state, capture) {
+  if (!capture || !avitoURL(capture.url) || !["search", "detail"].includes(capture.kind) || !Array.isArray(capture.items) || !capture.items.length) throw Error("Нет распознанных карточек для сохранения");
+  const next = structuredClone(state);
+  for (const row of capture.items) {
+    if (!/^\d+$/.test(row.id) || !avitoURL(row.url)) throw Error("Некорректная ссылка на объявление");
+    const prev = next.listings[row.id] || {id: row.id, firstSeen: capture.at};
+    // Отдельные поля сохраняют источник: краткая карточка не затирает полное объявление.
+    next.listings[row.id] = {...prev, url: row.url, lastSeen: capture.at,
+      ...(capture.kind === "detail" ? {detail: row, detailAt: capture.at} : {card: row})};
+  }
+  next.captures.push(capture);
+  return next;
+}
+export function observations(state) {
+  return state.captures.filter(c => c.kind === "search").flatMap(c => c.items.map(i => ({capture_id: c.captureId, captured_at: c.at, query: c.query, region: c.region, page: c.page, sort: c.sort, search_url: c.url, id: i.id, position_on_page: i.position, title: i.title, price: i.price, price_text: i.priceText, price_unit: i.priceUnit, promoted: i.promoted, url: i.url})));
+}
+export function listingRows(state) {
+  return Object.values(state.listings).map(l => {
+    const r = l.detail || l.card;
+    return {id: l.id, title: r.title, url: l.url, description: l.detail?.description ?? "", price: r.price, price_text: r.priceText, price_unit: r.priceUnit, price_from: r.priceFrom, seller: r.seller, seller_url: r.sellerURL, location: r.location, parameters: l.detail?.parametersText ?? "", images: (l.detail?.images || []).join("\n"), detail_saved: Boolean(l.detail), first_seen: l.firstSeen, last_seen: l.lastSeen, detail_at: l.detailAt ?? "", card_text: l.card?.rawText ?? ""};
+  });
+}
+export function csv(rows, columns) {
+  const cell = v => {
+    let s = v == null ? "" : String(v);
+    if (/^[\s]*[=+@-]/.test(s)) s = "'" + s;
+    return '"' + s.replaceAll('"', '""') + '"';
+  };
+  return "\uFEFF" + [columns, ...rows.map(r => columns.map(k => r[k]))].map(r => r.map(cell).join(",")).join("\r\n");
+}
+export function sellerRows(state) {
+  const groups=new Map();
+  for(const listing of Object.values(state.listings)) {
+    const row=listing.detail || listing.card;
+    const url=row.sellerURL || listing.card?.sellerURL;
+    if(!url) continue;
+    const group=groups.get(url) || {seller_url:url,seller:row.seller || listing.card?.seller || '',listing_ids:[],titles:[]};
+    group.listing_ids.push(listing.id);group.titles.push(row.title);groups.set(url,group);
+  }
+  return [...groups.values()].map(g=>({...g,listing_count:g.listing_ids.length,listing_ids:g.listing_ids.join(';'),titles:g.titles.join('\n')}));
+}
