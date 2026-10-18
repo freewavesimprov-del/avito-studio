@@ -4,13 +4,29 @@
 
 ## Запуск
 
+После распаковки архива готовый результат можно открыть без запуска скрипта:
+
 ```bash
-python3 competitor-intelligence/build_registry.py \
-  --seller-metrics analysis/seller-attention-metrics-2026-10-18.csv \
-  --research-json /path/to/avito-research.json \
-  --output-dir competitor-intelligence/output \
-  --limit 20
+cd ~/Downloads/competitor-intelligence
+open output/research-links.html
+open output/competitors.csv
 ```
+
+Для пересборки положите рядом с папкой свежие `avito-sellers-*.csv` и
+`avito-research-*.json`, затем укажите их настоящие имена:
+
+```bash
+cd ~/Downloads/competitor-intelligence
+python3 build_registry.py \
+  --seller-metrics ../avito-sellers-2026-10-18T09-35-36-567Z.csv \
+  --research-json ../avito-research-2026-10-18T09-35-34-016Z.json \
+  --output-dir output \
+  --limit 20
+open output/research-links.html
+```
+
+Имена файлов после даты будут отличаться. Их можно посмотреть командами
+`ls ../avito-sellers-*.csv` и `ls ../avito-research-*.json`.
 
 Результат:
 
