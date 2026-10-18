@@ -1,7 +1,7 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Автосбор продавцов</title><link rel="stylesheet" href="popup.css"></head>
 <body class="automation-page"><main>
   <h1>Автосбор профилей продавцов</h1>
-  <p>Расширение один раз открывает каждый уникальный профиль, собирает показатели продавца и пытается раскрыть блок проверенных реквизитов.</p>
+  <p>Расширение открывает каждый уникальный профиль и собирает показатели продавца. Для компаний оно затем открывает одно известное объявление и раскрывает там блок проверенных реквизитов.</p>
   <div id="summary" class="summary"></div>
   <div class="settings">
     <label>Профилей в серии<input id="limit" type="number" min="1" max="500" value="50"></label>
@@ -12,7 +12,7 @@
     <label>Повторов после капчи<input id="challengeRetries" type="number" min="0" max="3" value="1"></label>
   </div>
   <label><input id="refresh" type="checkbox"> Повторно проверить уже сохранённые профили</label>
-  <p class="hint">В очередь входят только настоящие ссылки на профили `/brands/…` и `/user/…/profile`. Одна карточка объявления на каждого продавца достаточна: охват рассчитывается по всей накопленной базе.</p>
+  <p class="hint">В очередь входят только настоящие ссылки на профили `/brands/…` и `/user/…/profile`. Ранее сохранённые компании без проверки реквизитов будут автоматически проверены повторно. Одна карточка объявления на каждого продавца достаточна: охват рассчитывается по всей накопленной базе.</p>
   <div class="controls"><button id="start" class="primary">Старт</button><button id="pause" disabled>Пауза</button><button id="stop" disabled>Стоп</button></div>
   <div class="progress"><div id="bar"></div></div>
   <p id="status" role="status" aria-live="polite">Готово к запуску.</p>

@@ -93,12 +93,18 @@ test('legacy backups gain a query catalog without losing data',()=>{
   assert.equal(state.queryMeta['новый'].source,'manual');
 });
 test('seller profile capture is merged and coverage is calculated',()=>{
-  let state=mergeCapture(fresh(),{...capture('инъектирование'),items:[{...card,seller:'ГидроПро',sellerURL:'https://www.avito.ru/brands/gidropro'}]});
-  const sellerCapture={kind:'seller',at:'2026-10-18T11:00:00Z',url:'https://www.avito.ru/brands/gidropro',profile:{url:'https://www.avito.ru/brands/gidropro',seller:'ГидроПро',profileType:'Компания',listingsTotal:10,verifiedRequisites:true,legalName:'ООО ГИДРОПРО',inn:'7712345678',badges:['Реквизиты проверены']}};
+  let state=mergeCapture(fresh(),{...capture('инъектирование'),items:[{...card,seller:'ГидроПро',sellerURL:'https://www.avito.ru/brands/gidropro',rawText:'Профилем владеет компания'}]});
+  const sellerCapture={kind:'seller',at:'2026-10-18T11:00:00Z',url:'https://www.avito.ru/brands/gidropro',profile:{url:'https://www.avito.ru/brands/gidropro',seller:'ГидроПро',profileType:'Компания',listingsTotal:10,verifiedRequisites:true,requisitesCheckedAt:'2026-10-18T11:00:00Z',legalName:'ООО ГИДРОПРО',inn:'7712345678',badges:['Реквизиты проверены']}};
   state=mergeSellerCapture(state,sellerCapture);
   const row=sellerRows(state)[0];
   assert.equal(row.listing_count,1);assert.equal(row.profile_listings_total,10);assert.equal(row.coverage_pct,'10.0');assert.equal(row.inn,'7712345678');assert.equal(row.queries_count,1);
   assert.equal(sellerProfileTargets(state).length,1);assert.equal(pendingSellerProfiles(state).length,0);assert.equal(pendingSellerProfiles(state,true).length,1);
+});
+test('company profiles captured before requisites support are queued once for repair',()=>{
+  let state=mergeCapture(fresh(),{...capture('инъектирование'),items:[{...card,seller:'ГидроПро',sellerURL:'https://www.avito.ru/brands/gidropro'}]});
+  state=mergeCapture(state,{...capture('инъектирование'),kind:'detail',url:card.url,items:[{...card,seller:'ГидроПро',sellerURL:'https://www.avito.ru/brands/gidropro',rawText:'Реквизиты проверены'}]});
+  state=mergeSellerCapture(state,{kind:'seller',at:'2026-10-18T11:00:00Z',url:'https://www.avito.ru/brands/gidropro',profile:{url:'https://www.avito.ru/brands/gidropro',seller:'ГидроПро'}});
+  const row=sellerRows(state)[0];assert.equal(row.company_hint,true);assert.equal(row.requisites_listing_url,card.url);assert.equal(pendingSellerProfiles(state).length,1);
 });
 test('seller queue ignores listing URLs used as fallback seller links',()=>{
   const state=mergeCapture(fresh(),{...capture('поиск'),items:[{...card,seller:'3 отзыва',sellerURL:card.url}]});

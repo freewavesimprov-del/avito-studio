@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Авито — локальное исследование услуг",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Собирает выдачу, объявления и профили продавцов Авито и сопоставляет запросы со спросом Wordstat.",
   "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage"],
   "host_permissions": ["https://www.avito.ru/*", "https://avito.ru/*", "https://searchapi.api.cloud.yandex.net/*"],

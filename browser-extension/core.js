@@ -207,8 +207,10 @@ export function sellerRows(state) {
     const row=hasUsableDetail(listing) ? listing.detail : listing.card;
     const url=row.sellerURL || listing.card?.sellerURL;
     if(!url) continue;
-    const group=groups.get(url) || {seller_url:url,seller:row.seller || listing.card?.seller || '',listing_ids:[],titles:[],detail_saved:0,unavailable:0,company_hint:false};
-    group.listing_ids.push(listing.id);group.titles.push(row.title);if(hasUsableDetail(listing)){group.detail_saved++;if(/Реквизиты проверены|Профилем владеет компания/i.test(row.rawText||''))group.company_hint=true;}if(hasTerminalDetail(listing))group.unavailable++;groups.set(url,group);
+    const group=groups.get(url) || {seller_url:url,seller:row.seller || listing.card?.seller || '',listing_ids:[],titles:[],detail_saved:0,unavailable:0,company_hint:false,representative_listing_url:'',requisites_listing_url:''};
+    group.listing_ids.push(listing.id);group.titles.push(row.title);group.representative_listing_url ||= row.url||listing.card?.url||listing.url||'';
+    if(hasUsableDetail(listing)){group.detail_saved++;if(/Реквизиты проверены|Профилем владеет компания/i.test(row.rawText||'')){group.company_hint=true;group.requisites_listing_url ||= row.url||listing.url||'';}}
+    if(hasTerminalDetail(listing))group.unavailable++;groups.set(url,group);
   }
   const observationsBySeller=new Map();
   const sellerByListing=new Map();
@@ -225,12 +227,12 @@ export function sellerRows(state) {
     const queries=[...new Set(seen.map(row=>row.query).filter(Boolean))];const positions=seen.map(row=>Number(row.position_on_page)).filter(Number.isFinite);
     const published=Number(profile.listingsTotal);const coverage=Number.isFinite(published)&&published>0?Math.min(100,100*g.listing_ids.length/published):null;
     return {...g,listing_count:g.listing_ids.length,search_appearances:seen.length,queries_count:queries.length,queries:queries.join('\n'),first_page_appearances:seen.filter(row=>Number(row.position_on_page)<=50).length,best_position:positions.length?Math.min(...positions):'',promoted_appearances:seen.filter(row=>row.promoted).length,
-      profile_captured:Boolean(profile.capturedAt),profile_captured_at:profile.capturedAt||'',profile_type:profile.profileType||'',rating:profile.rating??'',reviews:profile.reviews??'',avito_since_year:profile.avitoSinceYear||'',profile_listings_total:profile.listingsTotal??'',coverage_pct:coverage==null?'':coverage.toFixed(1),contact_person:profile.contactPerson||'',response_time:profile.responseTime||'',subscribers:profile.subscribers??'',verified_requisites:Boolean(profile.verifiedRequisites),legal_name:profile.legalName||'',inn:profile.inn||'',ogrn:profile.ogrn||'',kpp:profile.kpp||'',legal_address:profile.legalAddress||'',profile_location:profile.location||'',profile_description:profile.description||'',badges:(profile.badges||[]).join('; '),requisites_text:profile.requisitesText||'',profile_capture_issue:profile.captureIssue||'',listing_ids:g.listing_ids.join(';'),titles:g.titles.join('\n')};
+      profile_captured:Boolean(profile.capturedAt),profile_captured_at:profile.capturedAt||'',profile_type:profile.profileType||'',rating:profile.rating??'',reviews:profile.reviews??'',avito_since_year:profile.avitoSinceYear||'',profile_listings_total:profile.listingsTotal??'',coverage_pct:coverage==null?'':coverage.toFixed(1),contact_person:profile.contactPerson||'',response_time:profile.responseTime||'',subscribers:profile.subscribers??'',verified_requisites:Boolean(profile.verifiedRequisites),requisites_checked_at:profile.requisitesCheckedAt||'',legal_name:profile.legalName||'',inn:profile.inn||'',ogrn:profile.ogrn||'',kpp:profile.kpp||'',legal_address:profile.legalAddress||'',profile_location:profile.location||'',profile_description:profile.description||'',badges:(profile.badges||[]).join('; '),requisites_text:profile.requisitesText||'',profile_capture_issue:profile.captureIssue||'',listing_ids:g.listing_ids.join(';'),titles:g.titles.join('\n')};
   });
 }
 export function sellerProfileTargets(state){
   return sellerRows(state).filter(row=>sellerProfileURL(row.seller_url)).sort((a,b)=>Number(b.company_hint)-Number(a.company_hint)||b.listing_count-a.listing_count||a.seller.localeCompare(b.seller,'ru'));
 }
 export function pendingSellerProfiles(state,refresh=false){
-  return sellerProfileTargets(state).filter(row=>refresh||!row.profile_captured);
+  return sellerProfileTargets(state).filter(row=>refresh||!row.profile_captured||(row.company_hint&&row.requisites_listing_url&&!row.requisites_checked_at));
 }
