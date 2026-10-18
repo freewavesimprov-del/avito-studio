@@ -1,6 +1,8 @@
 import base64
 import importlib.util
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +15,23 @@ SPEC.loader.exec_module(MODULE)
 
 
 class YandexEnrichmentTests(unittest.TestCase):
+    def test_credentials_are_saved_and_loaded_with_private_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "credentials.json"
+            MODULE.save_credentials(path, "folder-1", "secret-key")
+            self.assertEqual(
+                MODULE.load_credentials(path),
+                {"folder_id": "folder-1", "api_key": "secret-key"},
+            )
+            if os.name == "posix":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_invalid_credentials_file_is_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "credentials.json"
+            path.write_text("not-json", encoding="utf-8")
+            self.assertEqual(MODULE.load_credentials(path), {})
+
     def test_parses_xml_results(self):
         xml = """<yandexsearch><response><results><grouping><group><doc>
         <url>https://www.rusprofile.ru/id/123</url><domain>www.rusprofile.ru</domain>

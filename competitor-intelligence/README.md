@@ -49,7 +49,6 @@ open output/research-links.html
 cd ~/Downloads/competitor-intelligence
 python3 enrich_yandex.py \
   --registry output/competitors.csv \
-  --folder-id ВАШ_FOLDER_ID \
   --output-dir output/yandex-search \
   --limit 20
 open output/yandex-search/review.html
@@ -60,7 +59,16 @@ open output/yandex-search/review.html
 ваш реестр, результаты и кэш уже оплаченных поисковых запросов. Скрипт при
 каждом запуске заново применяет актуальные правила оценки к сохранённому кэшу.
 
-API-ключ программа запросит скрыто. Он не записывается в CSV, HTML или кэш.
+При первом запуске программа запросит folder ID и API-ключ, после чего сохранит
+их в `~/.config/avito-competitor-intelligence/yandex-search.json`. Файл доступен
+только текущему пользователю macOS (`chmod 600`); ключ не попадает в CSV, HTML
+или поисковый кэш. На следующих запусках вводить доступ заново не нужно.
+Удалить сохранённые данные можно командой:
+
+```bash
+python3 enrich_yandex.py --forget-credentials
+```
+
 Используется тот же тип ключа сервисного аккаунта с областью
 `yc.search-api.execute`; в каталоге должен быть подключён Yandex Search API и
 назначена роль для веб-поиска.

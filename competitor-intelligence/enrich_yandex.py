@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Find company sites and legal records through Yandex Search API.
 
-The API key is requested with getpass and is never written to disk. Search
-responses are cached locally so an interrupted run can continue without spending
-the same API quota twice.
+The folder ID and API key are requested once and stored in a user-only config
+file. Search responses are cached locally so an interrupted run can continue
+without spending the same API quota twice.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 
 
 API_ENDPOINT = "https://searchapi.api.cloud.yandex.net/v2/web/search"
+DEFAULT_CREDENTIALS_PATH = Path.home() / ".config" / "avito-competitor-intelligence" / "yandex-search.json"
 LEGAL_DOMAINS = {
     "rusprofile.ru",
     "checko.ru",
@@ -112,6 +113,34 @@ class SearchResult:
 
 def clean(value: object) -> str:
     return str(value or "").strip()
+
+
+def load_credentials(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        "folder_id": clean(payload.get("folder_id")),
+        "api_key": clean(payload.get("api_key")),
+    }
+
+
+def save_credentials(path: Path, folder_id: str, api_key: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+    path.write_text(
+        json.dumps({"folder_id": folder_id, "api_key": api_key}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
 
 
 def normalize(value: str) -> str:
@@ -429,6 +458,7 @@ class YandexSearchClient:
                 raise RuntimeError(
                     "Search API вернул 403. Проверьте значение API-ключа, folder ID, включённый "
                     "Yandex Search API и роль search-api.webSearch.user/search-api.execute. "
+                    "Чтобы ввести доступ заново, выполните: python3 enrich_yandex.py --forget-credentials. "
                     f"Ответ: {message}"
                 ) from error
             raise RuntimeError(f"Search API вернул HTTP {error.code}: {message}") from error
@@ -549,7 +579,7 @@ def write_html(path: Path, rows: list[dict[str, str]], results_by_seller: dict[s
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry", type=Path, default=Path("output/competitors.csv"))
-    parser.add_argument("--folder-id", required=True)
+    parser.add_argument("--folder-id", help="Folder ID; при отсутствии берётся из сохранённого доступа")
     parser.add_argument("--output-dir", type=Path, default=Path("output/yandex-search"))
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--max-queries", type=int, default=4)
@@ -557,7 +587,23 @@ def main() -> None:
     parser.add_argument("--delay", type=float, default=0.7)
     parser.add_argument("--dry-run", action="store_true", help="Только показать план запросов, не обращаться к API")
     parser.add_argument("--api-key", help="Не рекомендуется: попадёт в историю shell. Лучше скрытый запрос.")
+    parser.add_argument(
+        "--credentials-file",
+        type=Path,
+        default=DEFAULT_CREDENTIALS_PATH,
+        help="Файл сохранённого доступа",
+    )
+    parser.add_argument("--no-save-credentials", action="store_true", help="Не сохранять введённые folder ID и API-ключ")
+    parser.add_argument("--forget-credentials", action="store_true", help="Удалить сохранённый доступ и завершить работу")
     args = parser.parse_args()
+
+    if args.forget_credentials:
+        try:
+            args.credentials_file.unlink()
+            print(f"Сохранённый доступ удалён: {args.credentials_file}")
+        except FileNotFoundError:
+            print("Сохранённого доступа нет.")
+        return
 
     rows, original_fields = read_registry(args.registry)
     rows = rows[: max(1, args.limit)]
@@ -569,11 +615,30 @@ def main() -> None:
                 print(f"  {query}")
         return
 
-    api_key = args.api_key or os.environ.get("YANDEX_SEARCH_API_KEY") or getpass.getpass("API-ключ Yandex Search API: ")
+    stored_credentials = load_credentials(args.credentials_file)
+    folder_id = clean(
+        args.folder_id
+        or os.environ.get("YANDEX_SEARCH_FOLDER_ID")
+        or stored_credentials.get("folder_id")
+        or input("Folder ID Яндекс Облака: ")
+    )
+    api_key = clean(
+        args.api_key
+        or os.environ.get("YANDEX_SEARCH_API_KEY")
+        or stored_credentials.get("api_key")
+        or getpass.getpass("API-ключ Yandex Search API: ")
+    )
+    if not folder_id:
+        parser.error("folder ID не указан")
     if not api_key:
         parser.error("API-ключ не указан")
+    if not args.no_save_credentials:
+        changed = stored_credentials != {"folder_id": folder_id, "api_key": api_key}
+        save_credentials(args.credentials_file, folder_id, api_key)
+        if changed:
+            print(f"Доступ сохранён для следующих запусков: {args.credentials_file}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    client = YandexSearchClient(api_key, args.folder_id, args.region, args.output_dir / "cache", args.delay)
+    client = YandexSearchClient(api_key, folder_id, args.region, args.output_dir / "cache", args.delay)
     results_by_seller: dict[str, list[SearchResult]] = {}
     flat_results: list[tuple[str, SearchResult]] = []
     for index, row in enumerate(rows, 1):
