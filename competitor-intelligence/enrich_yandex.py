@@ -60,6 +60,7 @@ NO_OFFICIAL_SITE_DOMAINS = LEGAL_DOMAINS | {
     "otzywy.com",
     "tilbagevise.ru",
     "uslugi.yandex.ru",
+    "propartner.ru",
 }
 SERVICE_WORDS = {
     "гидроизоляция",
@@ -219,7 +220,14 @@ def score_result(result: SearchResult, competitor: dict[str, str]) -> SearchResu
             score += 12
 
     legal_name, inn, ogrn = extract_legal(f"{result.title} {result.snippet}")
-    expected_inns = set(re.findall(r"\d{10}|\d{12}", " ".join([clean(competitor.get("inn_hint")), clean(competitor.get("inn"))])))
+    # Check 12 digits first: with the opposite alternation order a sole-trader
+    # INN was truncated to its first 10 digits and could never be confirmed.
+    expected_inns = set(
+        re.findall(
+            r"(?<!\d)(?:\d{12}|\d{10})(?!\d)",
+            " ".join([clean(competitor.get("inn_hint")), clean(competitor.get("inn"))]),
+        )
+    )
     inn_confirmed = bool(inn and inn in expected_inns)
     if inn_confirmed:
         score += 45
@@ -382,7 +390,14 @@ class YandexSearchClient:
         cache_path = self.cache_dir / f"{digest}.json"
         if cache_path.exists():
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
-            return [SearchResult(**item) for item in cached["results"]]
+            results = [SearchResult(**item) for item in cached["results"]]
+            # Classification rules evolve between releases, while the response
+            # cache is intentionally preserved. Reclassify cached URLs so an old
+            # directory result cannot remain an "official site" forever.
+            for result in results:
+                result.domain = domain_of(result.url) or result.domain
+                result.result_type = classify_result(result.domain)
+            return results
 
         body = {
             "query": {
@@ -449,9 +464,25 @@ AUTO_FIELDS = [
 
 def choose_candidates(results: list[SearchResult]) -> dict[str, str]:
     ranked = sorted(results, key=lambda item: (item.score, item.confidence == "high"), reverse=True)
-    legal = next((item for item in ranked if item.result_type == "legal_registry" and item.score >= 70), None)
+    legal = next(
+        (
+            item
+            for item in ranked
+            if item.result_type == "legal_registry"
+            and (item.score >= 70 or (item.confidence == "high" and bool(item.inn)))
+        ),
+        None,
+    )
     website = next((item for item in ranked if item.result_type == "official_site_candidate" and item.score >= 55), None)
-    best = website or legal
+    # A confirmed registry identity is stronger than a plausible website.
+    best = legal or website
+    same_identity = [item for item in ranked if legal and item.inn == legal.inn]
+    legal_name = legal.legal_name if legal else ""
+    ogrn = legal.ogrn if legal else ""
+    if legal and not legal_name:
+        legal_name = next((item.legal_name for item in same_identity if item.legal_name), "")
+    if legal and not ogrn:
+        ogrn = next((item.ogrn for item in same_identity if item.ogrn), "")
     evidence = []
     for item in ranked:
         if item.score >= 35 and item.url not in evidence:
@@ -460,9 +491,9 @@ def choose_candidates(results: list[SearchResult]) -> dict[str, str]:
         "auto_search_status": "candidate_found" if best else ("no_reliable_candidate" if ranked else "no_results"),
         "auto_match_confidence": best.confidence if best else "none",
         "auto_match_score": str(best.score) if best else "0",
-        "auto_legal_name_candidate": legal.legal_name if legal else "",
+        "auto_legal_name_candidate": legal_name,
         "auto_inn_candidate": legal.inn if legal else "",
-        "auto_ogrn_candidate": legal.ogrn if legal else "",
+        "auto_ogrn_candidate": ogrn,
         "auto_website_candidate": website.url if website else "",
         "auto_legal_record_url": legal.url if legal else "",
         "auto_evidence_urls": "\n".join(evidence[:8]),
