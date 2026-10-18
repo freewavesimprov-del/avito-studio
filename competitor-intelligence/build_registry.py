@@ -216,8 +216,8 @@ def search_links(name: str, legal_hint: str, inn_hint: str) -> dict[str, str]:
         "web_search": f"https://yandex.ru/search/?text={quote_plus(exact)}",
         "maps_search": f"https://yandex.ru/maps/?text={quote_plus(query + ' гидроизоляция')}",
         "two_gis_search": f"https://2gis.ru/moscow/search/{quote_plus(query + ' гидроизоляция')}",
-        "rusprofile_search": f"https://www.rusprofile.ru/search?query={quote_plus(legal_query)}",
-        "checko_search": f"https://checko.ru/search?query={quote_plus(legal_query)}",
+        "rusprofile_search": f"https://yandex.ru/search/?text={quote_plus('site:rusprofile.ru ' + legal_query)}",
+        "checko_search": f"https://yandex.ru/search/?text={quote_plus('site:checko.ru ' + legal_query)}",
         "fns_registry": "https://egrul.nalog.ru/index.html",
         "procurement_search": "https://zakupki.gov.ru/epz/order/extendedsearch/results.html?searchString=" + quote_plus(query),
     }

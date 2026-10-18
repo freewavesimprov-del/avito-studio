@@ -34,6 +34,41 @@ open output/research-links.html
 - `output/research-links.html` — локальная очередь со ссылками на поиск, карты, ФНС, агрегаторы и закупки;
 - `output/README.md` — краткое состояние проверки.
 
+## Автоматический поиск через Yandex Search API
+
+Прямые поисковые адреса Rusprofile и Checko не используются: они нестабильны и
+часто возвращают 404. `enrich_yandex.py` отправляет запросы в Yandex Search API,
+включая `site:rusprofile.ru` и `site:checko.ru`, получает реальные индексированные
+страницы и ранжирует совпадения.
+
+На macOS дважды нажмите `Запустить поиск Yandex.command` либо выполните:
+
+```bash
+cd ~/Downloads/competitor-intelligence
+python3 enrich_yandex.py \
+  --registry output/competitors.csv \
+  --folder-id ВАШ_FOLDER_ID \
+  --output-dir output/yandex-search \
+  --limit 20
+open output/yandex-search/review.html
+```
+
+API-ключ программа запросит скрыто. Он не записывается в CSV, HTML или кэш.
+Используется тот же тип ключа сервисного аккаунта с областью
+`yc.search-api.execute`; в каталоге должен быть подключён Yandex Search API и
+назначена роль для веб-поиска.
+
+Файлы автоматического этапа:
+
+- `output/yandex-search/competitors.enriched.csv` — лучшие кандидаты;
+- `output/yandex-search/search-results.csv` — все результаты и баллы;
+- `output/yandex-search/review.html` — удобная проверка найденных совпадений;
+- `output/yandex-search/cache/` — кэш, позволяющий продолжить прерванный запуск.
+
+Строки вроде `3 отзыва` и частные имена без дополнительных признаков
+автоматически пропускаются. Автоматическое совпадение остаётся кандидатом до
+ручного подтверждения ИНН/ОГРН либо нескольких независимых признаков.
+
 Повторный запуск сохраняет вручную заполненные поля из `competitors.csv`, если `seller_url` не изменился.
 
 ## Метод сопоставления
