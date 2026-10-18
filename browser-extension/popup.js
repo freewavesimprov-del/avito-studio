@@ -1,4 +1,4 @@
-import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, hasUsableDetail, hasTerminalDetail, terminalDetailStatus, validateBackup, csv} from './core.js';
+import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, hasUsableDetail, hasTerminalDetail, terminalDetailStatus, validateBackup, splitResearchBackup, combineResearchBackupParts, csv} from './core.js';
 import {wordstatSettings, fetchTopRequests, wordstatCandidates, filterWordstatCandidates} from './wordstat.js';
 
 const $ = id => document.getElementById(id);
@@ -9,6 +9,7 @@ let limit=40;
 const selectedSuggestions=new Set();
 const message=(text,error=false)=>{$('message').textContent=text;$('message').style.color=error?'#a11d2c':'#006b66';};
 const wordstatMessage=(text,error=false)=>{$('wordstatStatus').textContent=text;$('wordstatStatus').style.color=error?'#a11d2c':'#006b66';};
+const exportMessage=(text,error=false)=>{$('exportStatus').textContent=text;$('exportStatus').style.color=error?'#a11d2c':'#006b66';};
 const saveState=async next=>{state=normalizeState(next);await chrome.storage.local.set({research:state});};
 
 function row(title,subtitle,url,label='Открыть') {
@@ -139,12 +140,25 @@ $('clearSuggestions').onclick=()=>{selectedSuggestions.clear();renderWordstat();
 function download(text,name,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 const stamp=()=>new Date().toISOString().replace(/[:.]/g,'-');
 $('json').onclick=()=>download(JSON.stringify(state,null,2),`avito-research-${stamp()}.json`,'application/json');
+$('jsonParts').onclick=async()=>{
+  $('jsonParts').disabled=true;
+  try{
+    const maxMiB=Number($('jsonPartSize').value);const parts=splitResearchBackup(state,Math.round(maxMiB*1024*1024));const nameStamp=stamp();
+    for(let index=0;index<parts.length;index++){
+      const number=String(index+1).padStart(3,'0');const total=String(parts.length).padStart(3,'0');
+      download(parts[index],`avito-research-${nameStamp}-part-${number}-of-${total}.json`,'application/json');
+      await new Promise(resolve=>setTimeout(resolve,120));
+    }
+    exportMessage(parts.length===1?`Готово: выгружен 1 файл до ${maxMiB} МБ.`:`Готово: выгружено ${parts.length} частей до ${maxMiB} МБ. Если Chrome спросит, разрешите несколько скачиваний.`);
+  }catch(error){exportMessage(error?.message||String(error),true);}finally{$('jsonParts').disabled=false;}
+};
 $('listingsCSV').onclick=()=>download(csv(listingRows(state),['id','title','url','description','price','price_text','price_unit','price_from','seller','seller_url','location','parameters','images','detail_saved','unavailable','unavailable_reason','first_seen','last_seen','detail_at','card_text']),`avito-listings-${stamp()}.csv`,'text/csv;charset=utf-8');
 $('observationsCSV').onclick=()=>download(csv(observations(state),['capture_id','captured_at','query','region','page','sort','search_url','id','position_on_page','title','price','price_text','price_unit','promoted','url']),`avito-searches-${stamp()}.csv`,'text/csv;charset=utf-8');
 $('sellersCSV').onclick=()=>download(csv(sellerRows(state),['seller_url','seller','listing_count','listing_ids','titles']),`avito-sellers-${stamp()}.csv`,'text/csv;charset=utf-8');
 $('importJSON').onchange=async event=>{
   try{
-    const file=event.target.files?.[0];if(!file)return;const restored=normalizeState(validateBackup(JSON.parse(await file.text())));const details=Object.values(restored.listings).filter(hasUsableDetail).length;
+    const files=[...(event.target.files||[])];if(!files.length)return;const values=await Promise.all(files.map(async file=>JSON.parse(await file.text())));
+    const restored=normalizeState(values[0]?.format==='avito-research-parts-v1'?combineResearchBackupParts(values):files.length===1?validateBackup(values[0]):(()=>{throw Error('Обычную полную копию нужно выбрать одним файлом');})());const details=Object.values(restored.listings).filter(hasUsableDetail).length;
     if(!confirm(`Заменить текущие данные? В копии: ${Object.keys(restored.listings).length} объявлений, подробных карточек: ${details}, сохранений: ${restored.captures.length}.`))return;
     await saveState(restored);$('region').value=state.region;$('queries').value=state.queries.join('\n');$('wordstatRegions').value=(state.wordstat?.regionIds||['1']).join(', ');$('wordstatLimit').value=state.wordstat?.numPhrases||50;render();message('JSON-копия восстановлена.');
   }catch(error){message(error?.message||String(error),true);}finally{event.target.value='';}

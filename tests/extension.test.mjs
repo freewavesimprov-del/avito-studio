@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, checkSearchCapture, hasUsableDetail, hasTerminalDetail, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
+import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, checkSearchCapture, hasUsableDetail, hasTerminalDetail, validateBackup, splitResearchBackup, combineResearchBackupParts, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
 import {parseRegionIds, wordstatSettings, fetchTopRequests, wordstatCandidates, filterWordstatCandidates, WORDSTAT_URL} from '../browser-extension/wordstat.js';
 const card = {id:'123',title:'Инъектирование',url:'https://www.avito.ru/moskva/uslugi/injection_123',price:null,position:1};
 const capture = (query,kind='search') => ({kind,captureId:query,at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q='+encodeURIComponent(query),query,region:'moskva_i_mo',page:'1',sort:'default',items:[card]});
@@ -37,8 +37,8 @@ test('automation queue contains only unique listings without details',()=>{
   state.listings['bad']={id:'bad',url:'https://example.test/bad',firstSeen:'2026-10-17T08:00:00Z',card:{title:'Чужой сайт'}};
   assert.deepEqual(pendingListings(state).map(x=>x.id),['123']);
   assert.deepEqual(automationSettings({interval:'15',timeout:'60',limit:25}),{interval:15,timeout:60,limit:25,challengeTimeout:120,challengeCooldown:300,challengeRetries:1});
-  assert.throws(()=>automationSettings({interval:4,timeout:60,limit:25}));
-  assert.throws(()=>automationSettings({interval:15,timeout:10,limit:25}));
+  assert.throws(()=>automationSettings({interval:0,timeout:60,limit:25}));
+  assert.throws(()=>automationSettings({interval:15,timeout:4,limit:25}));
   assert.throws(()=>automationSettings({interval:15,timeout:60,limit:501}));
 });
 test('full JSON backup is validated before restore',()=>{
@@ -48,6 +48,17 @@ test('full JSON backup is validated before restore',()=>{
   assert.equal(Object.keys(restored.listings).length,1);
   assert.throws(()=>validateBackup({...state,listings:{'123':{...state.listings['123'],url:'https://example.test/'}}}));
   assert.throws(()=>validateBackup({...state,captures:[{kind:'search',url:'javascript:bad',items:[]}]}));
+});
+test('large JSON backups split below the byte limit and reassemble without loss',()=>{
+  const state=fresh();
+  for(let n=1;n<=3;n++){
+    const id=String(100+n);const url=`https://www.avito.ru/moskva/uslugi/item_${id}`;
+    state.listings[id]={id,url,firstSeen:'2026-10-18T10:00:00Z',lastSeen:'2026-10-18T10:00:00Z',card:{id,url,title:`Карточка ${id}`,rawText:String(n).repeat(600000)}};
+  }
+  const maxBytes=1024*1024;const parts=splitResearchBackup(state,maxBytes,{exportId:'test-export',exportedAt:'2026-10-18T10:00:00Z'});
+  assert.ok(parts.length>1);assert.ok(parts.every(part=>new TextEncoder().encode(part).length<=maxBytes));
+  assert.deepEqual(combineResearchBackupParts(parts),state);
+  assert.throws(()=>combineResearchBackupParts(parts.slice(1)));
 });
 test('search scan URLs and settings preserve page and sort',()=>{
   const url=new URL(searchPageURL('трещины & швы','moskva_i_mo',4,'104'));

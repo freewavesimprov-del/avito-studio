@@ -92,8 +92,8 @@ export function automationSettings(input) {
   const challengeTimeout = Number(input.challengeTimeout ?? 120);
   const challengeCooldown = Number(input.challengeCooldown ?? 300);
   const challengeRetries = Number(input.challengeRetries ?? 1);
-  if (!Number.isFinite(interval) || interval < 5 || interval > 3600) throw Error("Интервал должен быть от 5 до 3600 секунд");
-  if (!Number.isFinite(timeout) || timeout < 15 || timeout > 180) throw Error("Ожидание страницы должно быть от 15 до 180 секунд");
+  if (!Number.isFinite(interval) || interval < 1 || interval > 3600) throw Error("Интервал должен быть от 1 до 3600 секунд");
+  if (!Number.isFinite(timeout) || timeout < 5 || timeout > 180) throw Error("Ожидание страницы должно быть от 5 до 180 секунд");
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw Error("Размер серии должен быть от 1 до 500");
   if (!Number.isFinite(challengeTimeout) || challengeTimeout < 30 || challengeTimeout > 600) throw Error("Ожидание капчи должно быть от 30 до 600 секунд");
   if (!Number.isFinite(challengeCooldown) || challengeCooldown < 30 || challengeCooldown > 3600) throw Error("Пауза после капчи должна быть от 30 до 3600 секунд");
@@ -110,8 +110,8 @@ export function searchScanSettings(input) {
   const challengeRetries=Number(input.challengeRetries ?? 1);
   if(!Number.isInteger(firstPage) || firstPage<1 || firstPage>100)throw Error("Начальная страница должна быть от 1 до 100");
   if(!Number.isInteger(lastPage) || lastPage<firstPage || lastPage>100)throw Error("Конечная страница должна быть не меньше начальной и не больше 100");
-  if(!Number.isFinite(interval) || interval<5 || interval>3600)throw Error("Интервал должен быть от 5 до 3600 секунд");
-  if(!Number.isFinite(timeout) || timeout<15 || timeout>180)throw Error("Ожидание страницы должно быть от 15 до 180 секунд");
+  if(!Number.isFinite(interval) || interval<1 || interval>3600)throw Error("Интервал должен быть от 1 до 3600 секунд");
+  if(!Number.isFinite(timeout) || timeout<5 || timeout>180)throw Error("Ожидание страницы должно быть от 5 до 180 секунд");
   if(!Number.isFinite(challengeTimeout) || challengeTimeout<30 || challengeTimeout>600)throw Error("Ожидание капчи должно быть от 30 до 600 секунд");
   if(!Number.isFinite(challengeCooldown) || challengeCooldown<30 || challengeCooldown>3600)throw Error("Пауза после капчи должна быть от 30 до 3600 секунд");
   if(!Number.isInteger(challengeRetries) || challengeRetries<0 || challengeRetries>3)throw Error("Повторов после капчи должно быть от 0 до 3");
@@ -138,6 +138,46 @@ export function validateBackup(value) {
     if (!capture || !["search", "detail"].includes(capture.kind) || !Array.isArray(capture.items) || !avitoURL(capture.url)) throw Error("В копии повреждена история сохранений");
   }
   return structuredClone(value);
+}
+const utf8Size=value=>new TextEncoder().encode(value).length;
+export function splitResearchBackup(value,maxBytes,options={}) {
+  const state=validateBackup(value);
+  if(!Number.isInteger(maxBytes)||maxBytes<1024*1024||maxBytes>20*1024*1024)throw Error("Размер части должен быть от 1 до 20 МБ");
+  const exportId=String(options.exportId||crypto.randomUUID());
+  const exportedAt=String(options.exportedAt||new Date().toISOString());
+  const common=Object.fromEntries(Object.entries(state).filter(([key])=>!['listings','captures'].includes(key)));
+  const records=[{type:'common',value:common},...Object.entries(state.listings).map(([id,item])=>({type:'listing',id,value:item})),...state.captures.map(value=>({type:'capture',value}))];
+  const wrapperBytes=utf8Size(JSON.stringify({format:'avito-research-parts-v1',exportId,exportedAt,part:999999,parts:999999,records:[]}))+1024;
+  const groups=[];let group=[],bytes=wrapperBytes;
+  for(const record of records){
+    const recordBytes=utf8Size(JSON.stringify(record))+1;
+    if(recordBytes+wrapperBytes>maxBytes)throw Error(`Одна запись занимает больше лимита части (${Math.ceil(recordBytes/1024/1024)} МБ). Увеличьте размер части.`);
+    if(group.length&&bytes+recordBytes>maxBytes){groups.push(group);group=[];bytes=wrapperBytes;}
+    group.push(record);bytes+=recordBytes;
+  }
+  if(group.length)groups.push(group);
+  return groups.map((records,index)=>{
+    const part={format:'avito-research-parts-v1',exportId,exportedAt,part:index+1,parts:groups.length,records};
+    const json=JSON.stringify(part);if(utf8Size(json)>maxBytes)throw Error("Не удалось уложить часть в заданный размер");return json;
+  });
+}
+export function combineResearchBackupParts(values) {
+  if(!Array.isArray(values)||!values.length)throw Error("Не выбраны части JSON-копии");
+  const parts=values.map(value=>typeof value==='string'?JSON.parse(value):value);
+  const first=parts[0];
+  if(parts.some(part=>part?.format!=='avito-research-parts-v1'||part.exportId!==first.exportId||part.parts!==first.parts))throw Error("Выбраны части разных JSON-копий");
+  if(parts.length!==first.parts)throw Error(`Выбрано частей: ${parts.length}, требуется: ${first.parts}`);
+  parts.sort((a,b)=>a.part-b.part);
+  if(parts.some((part,index)=>part.part!==index+1))throw Error("Номера частей повторяются или часть отсутствует");
+  let common=null;const listings={},captures=[];
+  for(const part of parts)for(const record of part.records||[]){
+    if(record.type==='common'){if(common)throw Error("В частях повторяется служебная запись");common=record.value;}
+    else if(record.type==='listing'){if(listings[record.id])throw Error(`Объявление ${record.id} повторяется в частях`);listings[record.id]=record.value;}
+    else if(record.type==='capture')captures.push(record.value);
+    else throw Error("В части найден неизвестный тип записи");
+  }
+  if(!common)throw Error("В частях отсутствуют общие настройки исследования");
+  return validateBackup({...common,listings,captures});
 }
 export function csv(rows, columns) {
   const cell = v => {

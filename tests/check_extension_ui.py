@@ -33,6 +33,11 @@ with sync_playwright() as pw:
     backup=json.loads(Path(download.value.path()).read_text())
     assert len(backup['listings'])==1 and len(backup['captures'])==1
     with page.expect_download() as download:
+        page.locator('#jsonParts').click()
+    part=json.loads(Path(download.value.path()).read_text())
+    assert part['format']=='avito-research-parts-v1' and part['part']==1 and part['parts']==1
+    page.locator('#exportStatus').filter(has_text='выгружен 1 файл').wait_for()
+    with page.expect_download() as download:
         page.locator('#sellersCSV').click()
     assert 'Компания' in Path(download.value.path()).read_text(encoding='utf-8-sig')
     restored=backup.copy()

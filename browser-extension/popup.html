@@ -28,5 +28,15 @@
   <div id="wordstatSuggestions"></div>
 </section>
 <section id="detail" hidden><label><input id="pendingOnly" type="checkbox" checked> Только без полной карточки</label><button id="automation" class="primary">Автоматически собрать очередь</button><div id="listingList"></div><button id="more">Показать ещё</button><p class="hint">Автосбор открывается в отдельной вкладке управления. В ручном режиме откройте объявление и сохраните его тем же способом. Выгружаются только доступные в загруженной странице данные.</p></section>
-<section id="export" hidden><p>JSON содержит все сохранённые страницы и карточки. CSV подходят для Excel. Уникальные объявления связаны с наблюдениями через ID.</p><button id="json">Полная копия JSON</button><button id="listingsCSV">Объявления CSV</button><button id="observationsCSV">Выдача CSV</button><button id="sellersCSV">Исполнители CSV</button><label>Восстановить полную JSON-копию<input id="importJSON" type="file" accept="application/json,.json"></label><p class="hint">Импорт полностью заменяет локальные данные после подтверждения. CSV импортировать нельзя.</p><p>Делайте резервную копию JSON: удаление расширения удаляет его локальное хранилище.</p></section>
+<section id="export" hidden>
+  <p>JSON содержит все сохранённые страницы и карточки. CSV подходят для Excel. Уникальные объявления связаны с наблюдениями через ID.</p>
+  <button id="json">Полная копия JSON одним файлом</button>
+  <label>Максимальный размер части, МБ<input id="jsonPartSize" type="number" min="1" max="20" value="8"></label>
+  <button id="jsonParts" class="primary">JSON по частям для передачи</button>
+  <p id="exportStatus" role="status" aria-live="polite"></p>
+  <button id="listingsCSV">Объявления CSV</button><button id="observationsCSV">Выдача CSV</button><button id="sellersCSV">Исполнители CSV</button>
+  <label>Восстановить полную JSON-копию или все её части<input id="importJSON" type="file" accept="application/json,.json" multiple></label>
+  <p class="hint">Каждая часть остаётся меньше заданного лимита. Для восстановления разделённой копии выберите одновременно все её части. Импорт полностью заменяет локальные данные после подтверждения.</p>
+  <p>Делайте резервную копию JSON: удаление расширения удаляет его локальное хранилище.</p>
+</section>
 <script type="module" src="popup.js"></script></body></html>
