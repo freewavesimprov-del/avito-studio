@@ -1,4 +1,4 @@
-import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, hasUsableDetail, hasTerminalDetail, terminalDetailStatus, validateBackup, splitResearchBackup, combineResearchBackupParts, csv} from './core.js';
+import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, sellerProfileTargets, hasUsableDetail, hasTerminalDetail, terminalDetailStatus, validateBackup, splitResearchBackup, combineResearchBackupParts, csv} from './core.js';
 import {wordstatSettings, fetchTopRequests, wordstatCandidates, filterWordstatCandidates} from './wordstat.js';
 
 const $ = id => document.getElementById(id);
@@ -71,19 +71,24 @@ function renderSuggestionSummary(filtered,total){
 
 function render() {
   const entries=Object.values(state.listings);
-  $('stats').textContent=`Объявлений: ${entries.length} · Полных карточек: ${entries.filter(hasUsableDetail).length} · Недоступных: ${entries.filter(hasTerminalDetail).length} · Сохранений выдачи: ${state.captures.filter(c=>c.kind==='search').length}`;
+  const sellers=sellerProfileTargets(state);const captured=sellers.filter(row=>row.profile_captured).length;
+  $('stats').textContent=`Объявлений: ${entries.length} · Полных карточек: ${entries.filter(hasUsableDetail).length} · Профилей продавцов: ${captured}/${sellers.length} · Сохранений выдачи: ${state.captures.filter(c=>c.kind==='search').length}`;
   $('queryList').replaceChildren(...state.queries.map(renderQuery));
   const list=entries.filter(l=>!$('pendingOnly').checked||(!hasUsableDetail(l)&&!hasTerminalDetail(l)));
   $('listingList').replaceChildren(...list.slice(0,limit).map(l=>{const detail=hasUsableDetail(l)?l.detail:null;const terminal=terminalDetailStatus(l.detail);return row((detail||l.card).title,terminal?`Недоступно: ${terminal}`:detail?`Карточка сохранена; не найдены поля: ${detail.missingFields.join(', ')||'нет'}`:'Есть только выдача',l.url);}));
-  $('more').hidden=list.length<=limit;renderWordstat();
+  $('more').hidden=list.length<=limit;
+  $('sellerStats').textContent=`Уникальных профилей: ${sellers.length} · Сохранено: ${captured} · Осталось: ${sellers.length-captured}`;
+  $('sellerList').replaceChildren(...sellers.slice(0,40).map(item=>row(item.seller||item.seller_url,item.profile_captured?`Опубликовано: ${item.profile_listings_total||'не распознано'} · найдено нами: ${item.listing_count} · покрытие: ${item.coverage_pct?item.coverage_pct+'%':'—'}${item.inn?' · ИНН '+item.inn:''}`:`Найдено нами объявлений: ${item.listing_count} · профиль ещё не сохранён`,item.seller_url)));
+  renderWordstat();
 }
 
 $('region').value=state.region;$('queries').value=state.queries.join('\n');
 $('wordstatKey').value=credentials.apiKey||'';$('wordstatFolder').value=credentials.folderId||'';
 $('wordstatRegions').value=(state.wordstat?.regionIds||['1']).join(', ');$('wordstatLimit').value=state.wordstat?.numPhrases||50;render();
-for(const name of ['search','wordstat','detail','export']) $(`${name}Tab`).onclick=()=>{for(const n of ['search','wordstat','detail','export'])$(n).hidden=n!==name;};
+for(const name of ['search','wordstat','detail','seller','export']) $(`${name}Tab`).onclick=()=>{for(const n of ['search','wordstat','detail','seller','export'])$(n).hidden=n!==name;};
 $('more').onclick=()=>{limit+=40;render();};$('pendingOnly').onchange=()=>{limit=40;render();};
 $('automation').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('automation.html')});
+$('sellerAutomation').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('seller-automation.html')});
 $('searchAutomation').onclick=()=>chrome.tabs.create({url:chrome.runtime.getURL('search-automation.html')});
 
 $('saveSettings').onclick=async()=>{
@@ -154,7 +159,7 @@ $('jsonParts').onclick=async()=>{
 };
 $('listingsCSV').onclick=()=>download(csv(listingRows(state),['id','title','url','description','price','price_text','price_unit','price_from','seller','seller_url','location','parameters','images','detail_saved','unavailable','unavailable_reason','first_seen','last_seen','detail_at','card_text']),`avito-listings-${stamp()}.csv`,'text/csv;charset=utf-8');
 $('observationsCSV').onclick=()=>download(csv(observations(state),['capture_id','captured_at','query','region','page','sort','search_url','id','position_on_page','title','price','price_text','price_unit','promoted','url']),`avito-searches-${stamp()}.csv`,'text/csv;charset=utf-8');
-$('sellersCSV').onclick=()=>download(csv(sellerRows(state),['seller_url','seller','listing_count','listing_ids','titles']),`avito-sellers-${stamp()}.csv`,'text/csv;charset=utf-8');
+$('sellersCSV').onclick=()=>download(csv(sellerRows(state),['seller_url','seller','company_hint','listing_count','detail_saved','unavailable','search_appearances','queries_count','queries','first_page_appearances','best_position','promoted_appearances','profile_captured','profile_captured_at','profile_type','rating','reviews','avito_since_year','profile_listings_total','coverage_pct','contact_person','response_time','subscribers','verified_requisites','legal_name','inn','ogrn','kpp','legal_address','profile_location','profile_description','badges','requisites_text','profile_capture_issue','listing_ids','titles']),`avito-sellers-${stamp()}.csv`,'text/csv;charset=utf-8');
 $('importJSON').onchange=async event=>{
   try{
     const files=[...(event.target.files||[])];if(!files.length)return;const values=await Promise.all(files.map(async file=>JSON.parse(await file.text())));

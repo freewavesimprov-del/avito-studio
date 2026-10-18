@@ -59,6 +59,7 @@ class YandexEnrichmentTests(unittest.TestCase):
     def test_bad_or_bare_person_name_is_skipped(self):
         self.assertEqual(MODULE.query_plan({"seller": "3 отзыва"}, 4), [])
         self.assertEqual(MODULE.query_plan({"seller": "Николай"}, 4), [])
+        self.assertEqual(MODULE.query_plan({"seller": "Пользователь"}, 4), [])
 
     def test_nested_quotes_are_cleaned(self):
         queries = MODULE.query_plan({"seller": 'ООО "ГеоЦемСтрой"', "legal_name_hint": 'ООО "ГеоЦемСтрой"'}, 4)
@@ -149,6 +150,8 @@ class YandexEnrichmentTests(unittest.TestCase):
 
     def test_business_directory_is_not_official_site(self):
         self.assertEqual(MODULE.classify_result("propartner.ru"), "other")
+        self.assertEqual(MODULE.classify_result("focus.kontur.ru"), "other")
+        self.assertEqual(MODULE.classify_result("vbankcenter.ru"), "other")
 
     def test_confirmed_legal_identity_drives_overall_confidence(self):
         website = MODULE.SearchResult(

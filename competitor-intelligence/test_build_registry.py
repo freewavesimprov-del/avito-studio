@@ -55,6 +55,19 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(rows[0]["core_listings"], "12")
         self.assertEqual(rows[0]["first_page_slot_share_pct"], "0")
 
+    def test_plain_seller_export_ranks_by_inventory_without_fake_zero_metric_ranks(self):
+        rows = MODULE.normalize_seller_rows(
+            [
+                {"seller_url": "https://www.avito.ru/brands/small", "seller": "Малый", "listing_count": "1"},
+                {"seller_url": "https://www.avito.ru/brands/large", "seller": "Крупный", "listing_count": "50"},
+                {"seller_url": "https://www.avito.ru/brands/middle", "seller": "Средний", "listing_count": "10"},
+            ]
+        )
+        ranked = MODULE.rank_sellers(rows)
+        self.assertEqual([row["seller"] for row in ranked], ["Крупный", "Средний", "Малый"])
+        self.assertTrue(all("видимости" not in row["priority_reasons"] for row in ranked))
+        self.assertTrue(all("просмотров" not in row["priority_reasons"] for row in ranked))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -61,13 +61,11 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 
 
 def percentile_map(rows: list[dict[str, str]], field: str) -> dict[str, float]:
-    ordered = sorted((number(row.get(field)), row["seller_key"]) for row in rows)
-    if len(ordered) <= 1:
-        return {key: 1.0 for _, key in ordered}
-    result: dict[str, float] = {}
-    for index, (_, key) in enumerate(ordered):
-        result[key] = index / (len(ordered) - 1)
-    return result
+    values = sorted({number(row.get(field)) for row in rows})
+    if len(values) <= 1:
+        return {row["seller_key"]: 0.5 for row in rows}
+    ranks = {value: index / (len(values) - 1) for index, value in enumerate(values)}
+    return {row["seller_key"]: ranks[number(row.get(field))] for row in rows}
 
 
 def seller_key(row: dict[str, str]) -> str:
@@ -98,18 +96,30 @@ def rank_sellers(rows: list[dict[str, str]]) -> list[dict[str, str]]:
         item["seller_key"] = seller_key(item)
         prepared.append(item)
 
+    if not any(number(row.get("first_page_slot_share_pct")) for row in prepared):
+        for row in prepared:
+            row["first_page_slot_share_pct"] = clean(row.get("first_page_appearances")) or "0"
     visibility = percentile_map(prepared, "first_page_slot_share_pct")
     attention = percentile_map(prepared, "observed_view_share_pct")
     inventory_rows = [dict(row, inventory_log=str(math.log1p(number(row.get("core_listings"))))) for row in prepared]
     inventory = percentile_map(inventory_rows, "inventory_log")
 
-    by_visibility = {row["seller_key"] for row in sorted(prepared, key=lambda row: number(row.get("first_page_slot_share_pct")), reverse=True)[:10]}
-    by_attention = {row["seller_key"] for row in sorted(prepared, key=lambda row: number(row.get("observed_view_share_pct")), reverse=True)[:10]}
-    by_inventory = {row["seller_key"] for row in sorted(prepared, key=lambda row: number(row.get("core_listings")), reverse=True)[:10]}
+    metric_specs = [
+        ("visibility", "first_page_slot_share_pct", 0.45, visibility),
+        ("attention", "observed_view_share_pct", 0.35, attention),
+        ("inventory", "core_listings", 0.20, inventory),
+    ]
+    informative = [spec for spec in metric_specs if len({number(row.get(spec[1])) for row in prepared}) > 1]
+    if not informative:
+        informative = [metric_specs[-1]]
+    weight_total = sum(spec[2] for spec in informative)
+    by_visibility = {row["seller_key"] for row in sorted(prepared, key=lambda row: number(row.get("first_page_slot_share_pct")), reverse=True)[:10]} if any(spec[0] == "visibility" for spec in informative) else set()
+    by_attention = {row["seller_key"] for row in sorted(prepared, key=lambda row: number(row.get("observed_view_share_pct")), reverse=True)[:10]} if any(spec[0] == "attention" for spec in informative) else set()
+    by_inventory = {row["seller_key"] for row in sorted(prepared, key=lambda row: number(row.get("core_listings")), reverse=True)[:10]} if any(spec[0] == "inventory" for spec in informative) else set()
 
     for row in prepared:
         key = row["seller_key"]
-        row["priority_score"] = round(100 * (0.45 * visibility[key] + 0.35 * attention[key] + 0.20 * inventory[key]), 1)
+        row["priority_score"] = round(100 * sum(spec[2] * spec[3][key] for spec in informative) / weight_total, 1)
         reasons = []
         if key in by_visibility:
             reasons.append("топ-10 видимости")
@@ -331,6 +341,20 @@ def main() -> None:
     output = []
     for index, seller in enumerate(ranked, 1):
         key = seller["seller_key"]
+        extracted = extract_evidence(
+            clean(seller.get("seller")),
+            clean(seller.get("seller_url")),
+            evidence.get(clean(seller.get("seller_url"))),
+        )
+        if clean(seller.get("profile_captured")) in {"true", "True", "1"}:
+            extracted.update({
+                "avito_profile_type": clean(seller.get("profile_type")) or extracted["avito_profile_type"],
+                "avito_since_year": clean(seller.get("avito_since_year")) or extracted["avito_since_year"],
+                "avito_public_profile_ads": clean(seller.get("profile_listings_total")) or extracted["avito_public_profile_ads"],
+                "avito_contact_person": clean(seller.get("contact_person")) or extracted["avito_contact_person"],
+                "legal_name_hint": clean(seller.get("legal_name")) or extracted["legal_name_hint"],
+                "inn_hint": clean(seller.get("inn")) or extracted["inn_hint"],
+            })
         row = {
             "research_priority": str(index),
             "priority_score": str(seller["priority_score"]),
@@ -345,10 +369,17 @@ def main() -> None:
             "promoted_listings": clean(seller.get("promoted_listings")),
             "rating": clean(seller.get("rating")),
             "reviews": clean(seller.get("reviews")),
-            **extract_evidence(clean(seller.get("seller")), clean(seller.get("seller_url")), evidence.get(clean(seller.get("seller_url")))),
+            **extracted,
         }
         previous = old.get(key, {})
         row.update({field: clean(previous.get(field)) for field in MANUAL_FIELDS})
+        if clean(seller.get("verified_requisites")) in {"true", "True", "1"} and clean(seller.get("inn")):
+            row["identity_status"] = row["identity_status"] or "verified_on_avito"
+            row["match_confidence"] = row["match_confidence"] or "high"
+            row["legal_name"] = row["legal_name"] or clean(seller.get("legal_name"))
+            row["inn"] = row["inn"] or clean(seller.get("inn"))
+            row["ogrn_or_ogrnip"] = row["ogrn_or_ogrnip"] or clean(seller.get("ogrn"))
+            row["evidence_urls"] = row["evidence_urls"] or clean(seller.get("seller_url"))
         output.append(row)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

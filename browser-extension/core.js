@@ -1,6 +1,6 @@
 export const DEFAULT_QUERIES = ["инъекционная гидроизоляция", "гидроизоляционное инъектирование", "инъектирование трещин", "инъектирование швов", "инъектирование фундамента", "инъектирование подвала", "устранение течей в подвале", "отсечная гидроизоляция"];
 const defaultQueryMeta = () => ({avito: true, wordstat: true, cluster: "ядро", source: "preset"});
-export const fresh = () => normalizeState({version: 2, queries: [...DEFAULT_QUERIES], region: "moskva_i_mo", listings: {}, captures: []});
+export const fresh = () => normalizeState({version: 3, queries: [...DEFAULT_QUERIES], region: "moskva_i_mo", listings: {}, sellerProfiles: {}, captures: []});
 export function normalizeState(value) {
   const source=value && typeof value==="object" ? value : {};
   const queries=[...new Set((Array.isArray(source.queries)?source.queries:DEFAULT_QUERIES).map(q=>String(q).trim()).filter(Boolean))];
@@ -10,7 +10,7 @@ export function normalizeState(value) {
     const meta=oldMeta[query] && typeof oldMeta[query]==="object" ? oldMeta[query] : {};
     queryMeta[query]={...defaultQueryMeta(),...meta,avito:meta.avito!==false,wordstat:meta.wordstat!==false,cluster:String(meta.cluster||"ядро"),source:String(meta.source||"manual")};
   }
-  return {...source,version:2,queries,queryMeta,region:typeof source.region==="string"?source.region:"moskva_i_mo",listings:source.listings&&typeof source.listings==="object"?source.listings:{},captures:Array.isArray(source.captures)?source.captures:[]};
+  return {...source,version:3,queries,queryMeta,region:typeof source.region==="string"?source.region:"moskva_i_mo",listings:source.listings&&typeof source.listings==="object"?source.listings:{},sellerProfiles:source.sellerProfiles&&typeof source.sellerProfiles==="object"?source.sellerProfiles:{},captures:Array.isArray(source.captures)?source.captures:[]};
 }
 export function enabledQueries(state, channel) {
   const normalized=normalizeState(state);
@@ -54,6 +54,17 @@ export function mergeCapture(state, capture) {
       ...(capture.kind === "detail" ? {detail: row, detailAt: capture.at} : {card: row})};
   }
   next.captures.push(capture);
+  return next;
+}
+export function sellerProfileURL(value) {
+  if(!avitoURL(value))return false;
+  const path=new URL(value).pathname;
+  return /^\/(?:user\/[^/]+\/profile|brands\/[^/]+)\/?$/.test(path);
+}
+export function mergeSellerCapture(state,capture){
+  if(!capture||capture.kind!=="seller"||!sellerProfileURL(capture.url)||!capture.profile||capture.profile.url!==capture.url)throw Error("Профиль продавца не распознан");
+  const next=structuredClone(normalizeState(state));
+  next.sellerProfiles[capture.url]={...(next.sellerProfiles[capture.url]||{}),...capture.profile,capturedAt:capture.at};
   return next;
 }
 export function observations(state) {
@@ -137,7 +148,9 @@ export function validateBackup(value) {
   for (const capture of value.captures) {
     if (!capture || !["search", "detail"].includes(capture.kind) || !Array.isArray(capture.items) || !avitoURL(capture.url)) throw Error("В копии повреждена история сохранений");
   }
-  return structuredClone(value);
+  if(value.sellerProfiles!=null&&(!value.sellerProfiles||typeof value.sellerProfiles!=="object"||Array.isArray(value.sellerProfiles)))throw Error("В копии повреждены профили продавцов");
+  for(const [url,profile] of Object.entries(value.sellerProfiles||{}))if(!sellerProfileURL(url)||profile?.url!==url)throw Error(`Некорректный профиль продавца: ${url}`);
+  return normalizeState(structuredClone(value));
 }
 const utf8Size=value=>new TextEncoder().encode(value).length;
 export function splitResearchBackup(value,maxBytes,options={}) {
@@ -188,13 +201,36 @@ export function csv(rows, columns) {
   return "\uFEFF" + [columns, ...rows.map(r => columns.map(k => r[k]))].map(r => r.map(cell).join(",")).join("\r\n");
 }
 export function sellerRows(state) {
+  state=normalizeState(state);
   const groups=new Map();
   for(const listing of Object.values(state.listings)) {
     const row=hasUsableDetail(listing) ? listing.detail : listing.card;
     const url=row.sellerURL || listing.card?.sellerURL;
     if(!url) continue;
-    const group=groups.get(url) || {seller_url:url,seller:row.seller || listing.card?.seller || '',listing_ids:[],titles:[]};
-    group.listing_ids.push(listing.id);group.titles.push(row.title);groups.set(url,group);
+    const group=groups.get(url) || {seller_url:url,seller:row.seller || listing.card?.seller || '',listing_ids:[],titles:[],detail_saved:0,unavailable:0,company_hint:false};
+    group.listing_ids.push(listing.id);group.titles.push(row.title);if(hasUsableDetail(listing)){group.detail_saved++;if(/Реквизиты проверены|Профилем владеет компания/i.test(row.rawText||''))group.company_hint=true;}if(hasTerminalDetail(listing))group.unavailable++;groups.set(url,group);
   }
-  return [...groups.values()].map(g=>({...g,listing_count:g.listing_ids.length,listing_ids:g.listing_ids.join(';'),titles:g.titles.join('\n')}));
+  const observationsBySeller=new Map();
+  const sellerByListing=new Map();
+  for(const [id,listing] of Object.entries(state.listings)){
+    const row=hasUsableDetail(listing)?listing.detail:listing.card;
+    const url=row?.sellerURL||listing.card?.sellerURL;if(url)sellerByListing.set(id,url);
+  }
+  for(const observation of observations(state)){
+    const url=sellerByListing.get(observation.id);if(!url)continue;
+    const rows=observationsBySeller.get(url)||[];rows.push(observation);observationsBySeller.set(url,rows);
+  }
+  return [...groups.values()].map(g=>{
+    const profile=state.sellerProfiles[g.seller_url]||{};const seen=observationsBySeller.get(g.seller_url)||[];
+    const queries=[...new Set(seen.map(row=>row.query).filter(Boolean))];const positions=seen.map(row=>Number(row.position_on_page)).filter(Number.isFinite);
+    const published=Number(profile.listingsTotal);const coverage=Number.isFinite(published)&&published>0?Math.min(100,100*g.listing_ids.length/published):null;
+    return {...g,listing_count:g.listing_ids.length,search_appearances:seen.length,queries_count:queries.length,queries:queries.join('\n'),first_page_appearances:seen.filter(row=>Number(row.position_on_page)<=50).length,best_position:positions.length?Math.min(...positions):'',promoted_appearances:seen.filter(row=>row.promoted).length,
+      profile_captured:Boolean(profile.capturedAt),profile_captured_at:profile.capturedAt||'',profile_type:profile.profileType||'',rating:profile.rating??'',reviews:profile.reviews??'',avito_since_year:profile.avitoSinceYear||'',profile_listings_total:profile.listingsTotal??'',coverage_pct:coverage==null?'':coverage.toFixed(1),contact_person:profile.contactPerson||'',response_time:profile.responseTime||'',subscribers:profile.subscribers??'',verified_requisites:Boolean(profile.verifiedRequisites),legal_name:profile.legalName||'',inn:profile.inn||'',ogrn:profile.ogrn||'',kpp:profile.kpp||'',legal_address:profile.legalAddress||'',profile_location:profile.location||'',profile_description:profile.description||'',badges:(profile.badges||[]).join('; '),requisites_text:profile.requisitesText||'',profile_capture_issue:profile.captureIssue||'',listing_ids:g.listing_ids.join(';'),titles:g.titles.join('\n')};
+  });
+}
+export function sellerProfileTargets(state){
+  return sellerRows(state).filter(row=>sellerProfileURL(row.seller_url)).sort((a,b)=>Number(b.company_hint)-Number(a.company_hint)||b.listing_count-a.listing_count||a.seller.localeCompare(b.seller,'ru'));
+}
+export function pendingSellerProfiles(state,refresh=false){
+  return sellerProfileTargets(state).filter(row=>refresh||!row.profile_captured);
 }

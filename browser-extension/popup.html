@@ -2,7 +2,7 @@
 <body><header><h1>Исследование услуг</h1><p>Сохраняйте открытые страницы Авито. Данные остаются в этом браузере.</p></header>
 <button id="capture" class="primary">Сохранить открытую страницу</button><p id="message" role="status" aria-live="polite"></p>
 <div id="stats"></div>
-<nav><button id="searchTab">Запросы</button><button id="wordstatTab">Wordstat</button><button id="detailTab">Объявления</button><button id="exportTab">Выгрузка</button></nav>
+<nav><button id="searchTab">Запросы</button><button id="wordstatTab">Wordstat</button><button id="detailTab">Объявления</button><button id="sellerTab">Продавцы</button><button id="exportTab">Выгрузка</button></nav>
 <section id="search"><label>Регион Авито (slug)<input id="region" value="moskva_i_mo"></label><label>Общий каталог фраз — по одной на строке<textarea id="queries" rows="5"></textarea></label><button id="saveSettings">Сохранить список</button> <button id="searchAutomation" class="primary">Автоматически собрать страницы</button><div class="query-head"><b>Фраза</b><span>Авито</span><span>Wordstat</span><span></span></div><div id="queryList"></div><p class="hint">Переключатели задают, где использовать каждую фразу. Автосбор выдачи получает только отмеченные запросы Авито; сбор Wordstat — только отмеченные запросы Wordstat.</p></section>
 <section id="wordstat" hidden>
   <h2>Yandex Wordstat</h2>
@@ -28,13 +28,14 @@
   <div id="wordstatSuggestions"></div>
 </section>
 <section id="detail" hidden><label><input id="pendingOnly" type="checkbox" checked> Только без полной карточки</label><button id="automation" class="primary">Автоматически собрать очередь</button><div id="listingList"></div><button id="more">Показать ещё</button><p class="hint">Автосбор открывается в отдельной вкладке управления. В ручном режиме откройте объявление и сохраните его тем же способом. Выгружаются только доступные в загруженной странице данные.</p></section>
+<section id="seller" hidden><div id="sellerStats" class="summary"></div><button id="sellerAutomation" class="primary">Автоматически собрать профили</button><div id="sellerList"></div><p class="hint">Очередь строится из уникальных ссылок на профили, найденных в объявлениях. Для каждого продавца сохраняются реквизиты, показатели профиля и доля объявлений, уже попавших в исследование.</p></section>
 <section id="export" hidden>
   <p>JSON содержит все сохранённые страницы и карточки. CSV подходят для Excel. Уникальные объявления связаны с наблюдениями через ID.</p>
   <button id="json">Полная копия JSON одним файлом</button>
   <label>Максимальный размер части, МБ<input id="jsonPartSize" type="number" min="1" max="20" value="8"></label>
   <button id="jsonParts" class="primary">JSON по частям для передачи</button>
   <p id="exportStatus" role="status" aria-live="polite"></p>
-  <button id="listingsCSV">Объявления CSV</button><button id="observationsCSV">Выдача CSV</button><button id="sellersCSV">Исполнители CSV</button>
+  <button id="listingsCSV">Объявления CSV</button><button id="observationsCSV">Выдача CSV</button><button id="sellersCSV">Продавцы CSV</button>
   <label>Восстановить полную JSON-копию или все её части<input id="importJSON" type="file" accept="application/json,.json" multiple></label>
   <p class="hint">Каждая часть остаётся меньше заданного лимита. Для восстановления разделённой копии выберите одновременно все её части. Импорт полностью заменяет локальные данные после подтверждения.</p>
   <p>Делайте резервную копию JSON: удаление расширения удаляет его локальное хранилище.</p>

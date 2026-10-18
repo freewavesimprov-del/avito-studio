@@ -62,6 +62,12 @@ NO_OFFICIAL_SITE_DOMAINS = LEGAL_DOMAINS | {
     "tilbagevise.ru",
     "uslugi.yandex.ru",
     "propartner.ru",
+    "kontur.ru",
+    "star-pro.ru",
+    "testfirm.ru",
+    "comfex.ru",
+    "vbankcenter.ru",
+    "srogps.ru",
 }
 SERVICE_WORDS = {
     "гидроизоляция",
@@ -175,7 +181,7 @@ def quoted(value: str) -> str:
 
 def is_unsearchable_identity(competitor: dict[str, str]) -> bool:
     seller = normalize(clean(competitor.get("seller")))
-    if not seller or re.fullmatch(r"\d+\s+отзыв(?:а|ов)?", seller):
+    if not seller or seller in {"пользователь", "частное лицо", "исполнитель", "продавец"} or re.fullmatch(r"\d+\s+отзыв(?:а|ов)?", seller):
         return True
     if clean(competitor.get("legal_name_hint")) or clean(competitor.get("avito_contact_person")):
         return False
@@ -499,7 +505,8 @@ def choose_candidates(results: list[SearchResult]) -> dict[str, str]:
             item
             for item in ranked
             if item.result_type == "legal_registry"
-            and (item.score >= 70 or (item.confidence == "high" and bool(item.inn)))
+            and item.confidence == "high"
+            and bool(item.inn)
         ),
         None,
     )

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, checkSearchCapture, hasUsableDetail, hasTerminalDetail, validateBackup, splitResearchBackup, combineResearchBackupParts, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
+import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, mergeCapture, mergeSellerCapture, observations, listingRows, pendingListings, sellerRows, sellerProfileTargets, pendingSellerProfiles, automationSettings, searchScanSettings, checkSearchCapture, hasUsableDetail, hasTerminalDetail, validateBackup, splitResearchBackup, combineResearchBackupParts, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
 import {parseRegionIds, wordstatSettings, fetchTopRequests, wordstatCandidates, filterWordstatCandidates, WORDSTAT_URL} from '../browser-extension/wordstat.js';
 const card = {id:'123',title:'Инъектирование',url:'https://www.avito.ru/moskva/uslugi/injection_123',price:null,position:1};
 const capture = (query,kind='search') => ({kind,captureId:query,at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q='+encodeURIComponent(query),query,region:'moskva_i_mo',page:'1',sort:'default',items:[card]});
@@ -91,6 +91,18 @@ test('legacy backups gain a query catalog without losing data',()=>{
   state=updateQueries(state,['второй','новый']);
   assert.equal(state.queryMeta['второй'].avito,false);
   assert.equal(state.queryMeta['новый'].source,'manual');
+});
+test('seller profile capture is merged and coverage is calculated',()=>{
+  let state=mergeCapture(fresh(),{...capture('инъектирование'),items:[{...card,seller:'ГидроПро',sellerURL:'https://www.avito.ru/brands/gidropro'}]});
+  const sellerCapture={kind:'seller',at:'2026-10-18T11:00:00Z',url:'https://www.avito.ru/brands/gidropro',profile:{url:'https://www.avito.ru/brands/gidropro',seller:'ГидроПро',profileType:'Компания',listingsTotal:10,verifiedRequisites:true,legalName:'ООО ГИДРОПРО',inn:'7712345678',badges:['Реквизиты проверены']}};
+  state=mergeSellerCapture(state,sellerCapture);
+  const row=sellerRows(state)[0];
+  assert.equal(row.listing_count,1);assert.equal(row.profile_listings_total,10);assert.equal(row.coverage_pct,'10.0');assert.equal(row.inn,'7712345678');assert.equal(row.queries_count,1);
+  assert.equal(sellerProfileTargets(state).length,1);assert.equal(pendingSellerProfiles(state).length,0);assert.equal(pendingSellerProfiles(state,true).length,1);
+});
+test('seller queue ignores listing URLs used as fallback seller links',()=>{
+  const state=mergeCapture(fresh(),{...capture('поиск'),items:[{...card,seller:'3 отзыва',sellerURL:card.url}]});
+  assert.equal(sellerRows(state).length,1);assert.equal(sellerProfileTargets(state).length,0);
 });
 test('Wordstat settings and response use the Yandex Cloud v2 contract',async()=>{
   const settings=wordstatSettings({apiKey:'secret',folderId:'folder',regionIds:'1, 213;1',numPhrases:'50'});
