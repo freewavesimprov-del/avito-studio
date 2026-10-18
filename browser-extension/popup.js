@@ -1,4 +1,4 @@
-import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, hasUsableDetail, validateBackup, csv} from './core.js';
+import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, avitoURL, searchURL, mergeCapture, observations, listingRows, sellerRows, hasUsableDetail, hasTerminalDetail, terminalDetailStatus, validateBackup, csv} from './core.js';
 import {wordstatSettings, fetchTopRequests, wordstatCandidates, filterWordstatCandidates} from './wordstat.js';
 
 const $ = id => document.getElementById(id);
@@ -70,10 +70,10 @@ function renderSuggestionSummary(filtered,total){
 
 function render() {
   const entries=Object.values(state.listings);
-  $('stats').textContent=`Объявлений: ${entries.length} · Полных карточек: ${entries.filter(hasUsableDetail).length} · Сохранений выдачи: ${state.captures.filter(c=>c.kind==='search').length}`;
+  $('stats').textContent=`Объявлений: ${entries.length} · Полных карточек: ${entries.filter(hasUsableDetail).length} · Недоступных: ${entries.filter(hasTerminalDetail).length} · Сохранений выдачи: ${state.captures.filter(c=>c.kind==='search').length}`;
   $('queryList').replaceChildren(...state.queries.map(renderQuery));
-  const list=entries.filter(l=>!$('pendingOnly').checked||!hasUsableDetail(l));
-  $('listingList').replaceChildren(...list.slice(0,limit).map(l=>{const detail=hasUsableDetail(l)?l.detail:null;return row((detail||l.card).title,detail?`Карточка сохранена; не найдены поля: ${detail.missingFields.join(', ')||'нет'}`:'Есть только выдача',l.url);}));
+  const list=entries.filter(l=>!$('pendingOnly').checked||(!hasUsableDetail(l)&&!hasTerminalDetail(l)));
+  $('listingList').replaceChildren(...list.slice(0,limit).map(l=>{const detail=hasUsableDetail(l)?l.detail:null;const terminal=terminalDetailStatus(l.detail);return row((detail||l.card).title,terminal?`Недоступно: ${terminal}`:detail?`Карточка сохранена; не найдены поля: ${detail.missingFields.join(', ')||'нет'}`:'Есть только выдача',l.url);}));
   $('more').hidden=list.length<=limit;renderWordstat();
 }
 
@@ -98,6 +98,7 @@ $('capture').onclick=async()=>{
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
     if(!avitoURL(tab?.url))throw Error('Откройте вкладку Авито, затем нажмите значок расширения.');
     const results=await chrome.scripting.executeScript({target:{tabId:tab.id},files:['capture.js']});const capture=results[0]?.result;
+    if(capture?.kind==='status')throw Error(capture.reason||'Страница пока не готова');
     await saveState(mergeCapture(state,capture));render();
     message(capture.kind==='search'?`Сохранено ${capture.items.length} карточек. Запрос: ${capture.query||'(в адресе не указан)'}. Страница: ${capture.page}.`:`Объявление сохранено. Не найдены поля: ${capture.items[0].missingFields.join(', ')||'нет'}.`);
   }catch(error){message(error.message||String(error),true);}finally{$('capture').disabled=false;}
@@ -138,7 +139,7 @@ $('clearSuggestions').onclick=()=>{selectedSuggestions.clear();renderWordstat();
 function download(text,name,type){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 const stamp=()=>new Date().toISOString().replace(/[:.]/g,'-');
 $('json').onclick=()=>download(JSON.stringify(state,null,2),`avito-research-${stamp()}.json`,'application/json');
-$('listingsCSV').onclick=()=>download(csv(listingRows(state),['id','title','url','description','price','price_text','price_unit','price_from','seller','seller_url','location','parameters','images','detail_saved','first_seen','last_seen','detail_at','card_text']),`avito-listings-${stamp()}.csv`,'text/csv;charset=utf-8');
+$('listingsCSV').onclick=()=>download(csv(listingRows(state),['id','title','url','description','price','price_text','price_unit','price_from','seller','seller_url','location','parameters','images','detail_saved','unavailable','unavailable_reason','first_seen','last_seen','detail_at','card_text']),`avito-listings-${stamp()}.csv`,'text/csv;charset=utf-8');
 $('observationsCSV').onclick=()=>download(csv(observations(state),['capture_id','captured_at','query','region','page','sort','search_url','id','position_on_page','title','price','price_text','price_unit','promoted','url']),`avito-searches-${stamp()}.csv`,'text/csv;charset=utf-8');
 $('sellersCSV').onclick=()=>download(csv(sellerRows(state),['seller_url','seller','listing_count','listing_ids','titles']),`avito-sellers-${stamp()}.csv`,'text/csv;charset=utf-8');
 $('importJSON').onchange=async event=>{

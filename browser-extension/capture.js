@@ -21,6 +21,10 @@
   };
   const common = {captureId: crypto.randomUUID(), at: new Date().toISOString(), url: location.href, title: document.title};
   const currentURL = new URL(location.href);
+  const pageText=text(document.body);
+  if(/доступ ограничен|проверка безопасности|проверка браузера|подтвердите, что (?:вы|это вы)|пройдите проверку|captcha|капч/i.test(`${document.title}\n${pageText.slice(0,5000)}`)) {
+    return {...common,kind:"status",status:"challenge",reason:"Авито запрашивает проверку или капчу"};
+  }
   const cards = [...document.querySelectorAll('[data-marker="item"]')].filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
   const listingId=idOf(location.href);
   const searchInput=find(document, 'input[data-marker="search-form/suggest"], input[name="q"], input[placeholder*="Поиск"]');
@@ -47,7 +51,15 @@
   }
   const id = listingId;
   const title = text(find(document, '[data-marker="item-view/title-info"], h1[itemprop="name"], h1'));
-  if (/доступ ограничен|проверка безопасности|проверка браузера/i.test(document.title) || /объявление не посмотреть/i.test(title) || !id || !title) {
+  const unavailable=pageText.match(/объявление (?:снято с публикации|не посмотреть|закрыто|удалено|завершено|больше не доступно|неактивно|не активно)|такого объявления (?:нет|не существует)|страница объявления не найдена/i)?.[0]||"";
+  if(id && unavailable){
+    const row={id,url:location.origin+location.pathname,title:title||"Объявление недоступно",availability:"unavailable",availabilityText:unavailable,rawText:pageText,images:[],missingFields:[]};
+    return {...common,kind:"detail",items:[row]};
+  }
+  if(/попробуйте перезагрузить|выключите vpn|что-то пошло не так|временно недоступ/i.test(pageText.slice(0,5000))) {
+    return {...common,kind:"status",status:"transient",reason:"Авито показал временную ошибку страницы"};
+  }
+  if (!id || !title) {
     throw Error("Выдача или объявление ещё не распознаны. Дождитесь загрузки, завершите проверку сайта и нажмите «Сохранить» снова.");
   }
   const body = find(document, 'main, [data-marker="item-view"]') || document;

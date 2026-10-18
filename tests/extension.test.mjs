@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, checkSearchCapture, hasUsableDetail, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
+import {fresh, normalizeState, updateQueries, setQueryMeta, enabledQueries, mergeCapture, observations, listingRows, pendingListings, automationSettings, searchScanSettings, checkSearchCapture, hasUsableDetail, hasTerminalDetail, validateBackup, csv, searchURL, searchPageURL, avitoURL} from '../browser-extension/core.js';
 import {parseRegionIds, wordstatSettings, fetchTopRequests, wordstatCandidates, filterWordstatCandidates, WORDSTAT_URL} from '../browser-extension/wordstat.js';
 const card = {id:'123',title:'Инъектирование',url:'https://www.avito.ru/moskva/uslugi/injection_123',price:null,position:1};
 const capture = (query,kind='search') => ({kind,captureId:query,at:'2026-10-17T10:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q='+encodeURIComponent(query),query,region:'moskva_i_mo',page:'1',sort:'default',items:[card]});
@@ -36,7 +36,7 @@ test('automation queue contains only unique listings without details',()=>{
   state.listings['999']={id:'999',url:'https://www.avito.ru/moskva/uslugi/detail_999',firstSeen:'2026-10-17T09:00:00Z',card:{title:'Сохранено'},detail:{title:'Сохранено'}};
   state.listings['bad']={id:'bad',url:'https://example.test/bad',firstSeen:'2026-10-17T08:00:00Z',card:{title:'Чужой сайт'}};
   assert.deepEqual(pendingListings(state).map(x=>x.id),['123']);
-  assert.deepEqual(automationSettings({interval:'15',timeout:'60',limit:25}),{interval:15,timeout:60,limit:25});
+  assert.deepEqual(automationSettings({interval:'15',timeout:'60',limit:25}),{interval:15,timeout:60,limit:25,challengeTimeout:120,challengeCooldown:300,challengeRetries:1});
   assert.throws(()=>automationSettings({interval:4,timeout:60,limit:25}));
   assert.throws(()=>automationSettings({interval:15,timeout:10,limit:25}));
   assert.throws(()=>automationSettings({interval:15,timeout:60,limit:501}));
@@ -54,19 +54,21 @@ test('search scan URLs and settings preserve page and sort',()=>{
   assert.equal(url.searchParams.get('q'),'трещины & швы');
   assert.equal(url.searchParams.get('p'),'4');
   assert.equal(url.searchParams.get('s'),'104');
-  assert.deepEqual(searchScanSettings({firstPage:'1',lastPage:'4',interval:'15',timeout:'60',sort:'default'}),{firstPage:1,lastPage:4,interval:15,timeout:60,sort:'default'});
+  assert.deepEqual(searchScanSettings({firstPage:'1',lastPage:'4',interval:'15',timeout:'60',sort:'default'}),{firstPage:1,lastPage:4,interval:15,timeout:60,sort:'default',challengeTimeout:120,challengeCooldown:300,challengeRetries:1});
   assert.throws(()=>searchScanSettings({firstPage:4,lastPage:2,interval:15,timeout:60,sort:'default'}));
   const empty={kind:'search',captureId:'empty',at:'2026-10-17T12:00:00Z',url:'https://www.avito.ru/moskva_i_mo/predlozheniya_uslug?q=x&p=9',query:'x',region:'moskva_i_mo',page:'9',sort:'default',items:[]};
   assert.equal(mergeCapture(fresh(),empty).captures.length,1);
   assert.equal(checkSearchCapture({kind:'search',query:'  Трещины   и швы ',page:'4',sort:'default'},{query:'трещины и швы',page:4,sort:'default'}).ok,true);
   assert.match(checkSearchCapture({kind:'search',query:'другой',page:'4',sort:'default'},{query:'трещины',page:4,sort:'default'}).reason,/другой запрос/);
 });
-test('unavailable legacy details return to pending queue',()=>{
+test('unavailable details are terminal and stay out of the queue',()=>{
   const state=mergeCapture(fresh(),capture('поиск'));
   state.listings['123'].detail={...card,title:'Объявление не посмотреть'};
   assert.equal(hasUsableDetail(state.listings['123']),false);
-  assert.deepEqual(pendingListings(state).map(x=>x.id),['123']);
+  assert.equal(hasTerminalDetail(state.listings['123']),true);
+  assert.deepEqual(pendingListings(state),[]);
   assert.equal(listingRows(state)[0].detail_saved,false);
+  assert.equal(listingRows(state)[0].unavailable,true);
 });
 test('legacy backups gain a query catalog without losing data',()=>{
   const legacy={version:1,queries:['первый','второй','первый'],region:'moskva_i_mo',listings:{},captures:[]};

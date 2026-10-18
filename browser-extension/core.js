@@ -60,40 +60,63 @@ export function observations(state) {
   return state.captures.filter(c => c.kind === "search").flatMap(c => c.items.map(i => ({capture_id: c.captureId, captured_at: c.at, query: c.query, region: c.region, page: c.page, sort: c.sort, search_url: c.url, id: i.id, position_on_page: i.position, title: i.title, price: i.price, price_text: i.priceText, price_unit: i.priceUnit, promoted: i.promoted, url: i.url})));
 }
 export function hasUsableDetail(listing) {
-  return Boolean(listing?.detail && !/объявление не посмотреть/i.test(listing.detail.title || ""));
+  return Boolean(listing?.detail && !terminalDetailStatus(listing.detail));
+}
+export function terminalDetailStatus(detail) {
+  if(!detail)return "";
+  if(detail.availability==="unavailable")return detail.availabilityText||"Объявление недоступно";
+  const text=`${detail.title||""}\n${detail.rawText||""}`;
+  const match=text.match(/объявление (?:снято с публикации|не посмотреть|закрыто|удалено|завершено|больше не доступно|неактивно|не активно)|такого объявления (?:нет|не существует)|страница объявления не найдена/i);
+  return match?.[0]||"";
+}
+export function hasTerminalDetail(listing) {
+  return Boolean(terminalDetailStatus(listing?.detail));
 }
 export function listingRows(state) {
   return Object.values(state.listings).map(l => {
     const detail=hasUsableDetail(l) ? l.detail : null;
+    const terminal=terminalDetailStatus(l.detail);
     const r = detail || l.card;
-    return {id: l.id, title: r.title, url: l.url, description: detail?.description ?? "", price: r.price, price_text: r.priceText, price_unit: r.priceUnit, price_from: r.priceFrom, seller: r.seller, seller_url: r.sellerURL, location: r.location, parameters: detail?.parametersText ?? "", images: (detail?.images || []).join("\n"), detail_saved: Boolean(detail), first_seen: l.firstSeen, last_seen: l.lastSeen, detail_at: detail ? (l.detailAt ?? "") : "", card_text: l.card?.rawText ?? ""};
+    return {id: l.id, title: r.title, url: l.url, description: detail?.description ?? "", price: r.price, price_text: r.priceText, price_unit: r.priceUnit, price_from: r.priceFrom, seller: r.seller, seller_url: r.sellerURL, location: r.location, parameters: detail?.parametersText ?? "", images: (detail?.images || []).join("\n"), detail_saved: Boolean(detail), unavailable: Boolean(terminal), unavailable_reason: terminal, first_seen: l.firstSeen, last_seen: l.lastSeen, detail_at: l.detail ? (l.detailAt ?? "") : "", card_text: l.card?.rawText ?? ""};
   });
 }
 export function pendingListings(state) {
   return Object.values(state.listings)
-    .filter(listing => !hasUsableDetail(listing) && avitoURL(listing.url))
+    .filter(listing => !hasUsableDetail(listing) && !hasTerminalDetail(listing) && avitoURL(listing.url))
     .sort((a, b) => String(a.firstSeen || "").localeCompare(String(b.firstSeen || "")));
 }
 export function automationSettings(input) {
   const interval = Number(input.interval);
   const timeout = Number(input.timeout);
   const limit = Number(input.limit);
+  const challengeTimeout = Number(input.challengeTimeout ?? 120);
+  const challengeCooldown = Number(input.challengeCooldown ?? 300);
+  const challengeRetries = Number(input.challengeRetries ?? 1);
   if (!Number.isFinite(interval) || interval < 5 || interval > 3600) throw Error("Интервал должен быть от 5 до 3600 секунд");
   if (!Number.isFinite(timeout) || timeout < 15 || timeout > 180) throw Error("Ожидание страницы должно быть от 15 до 180 секунд");
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw Error("Размер серии должен быть от 1 до 500");
-  return {interval, timeout, limit};
+  if (!Number.isFinite(challengeTimeout) || challengeTimeout < 30 || challengeTimeout > 600) throw Error("Ожидание капчи должно быть от 30 до 600 секунд");
+  if (!Number.isFinite(challengeCooldown) || challengeCooldown < 30 || challengeCooldown > 3600) throw Error("Пауза после капчи должна быть от 30 до 3600 секунд");
+  if (!Number.isInteger(challengeRetries) || challengeRetries < 0 || challengeRetries > 3) throw Error("Повторов после капчи должно быть от 0 до 3");
+  return {interval, timeout, limit, challengeTimeout, challengeCooldown, challengeRetries};
 }
 export function searchScanSettings(input) {
   const firstPage=Number(input.firstPage);
   const lastPage=Number(input.lastPage);
   const interval=Number(input.interval);
   const timeout=Number(input.timeout);
+  const challengeTimeout=Number(input.challengeTimeout ?? 120);
+  const challengeCooldown=Number(input.challengeCooldown ?? 300);
+  const challengeRetries=Number(input.challengeRetries ?? 1);
   if(!Number.isInteger(firstPage) || firstPage<1 || firstPage>100)throw Error("Начальная страница должна быть от 1 до 100");
   if(!Number.isInteger(lastPage) || lastPage<firstPage || lastPage>100)throw Error("Конечная страница должна быть не меньше начальной и не больше 100");
   if(!Number.isFinite(interval) || interval<5 || interval>3600)throw Error("Интервал должен быть от 5 до 3600 секунд");
   if(!Number.isFinite(timeout) || timeout<15 || timeout>180)throw Error("Ожидание страницы должно быть от 15 до 180 секунд");
+  if(!Number.isFinite(challengeTimeout) || challengeTimeout<30 || challengeTimeout>600)throw Error("Ожидание капчи должно быть от 30 до 600 секунд");
+  if(!Number.isFinite(challengeCooldown) || challengeCooldown<30 || challengeCooldown>3600)throw Error("Пауза после капчи должна быть от 30 до 3600 секунд");
+  if(!Number.isInteger(challengeRetries) || challengeRetries<0 || challengeRetries>3)throw Error("Повторов после капчи должно быть от 0 до 3");
   if(!["default","104"].includes(input.sort))throw Error("Неизвестная сортировка");
-  return {firstPage,lastPage,interval,timeout,sort:input.sort};
+  return {firstPage,lastPage,interval,timeout,sort:input.sort,challengeTimeout,challengeCooldown,challengeRetries};
 }
 const normalizedQuery=value=>String(value||"").trim().replace(/\s+/g," ").toLocaleLowerCase("ru");
 export function checkSearchCapture(capture,target) {
