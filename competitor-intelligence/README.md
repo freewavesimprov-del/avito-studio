@@ -41,7 +41,9 @@ open output/research-links.html
 включая `site:rusprofile.ru` и `site:checko.ru`, получает реальные индексированные
 страницы и ранжирует совпадения.
 
-На macOS дважды нажмите `Запустить поиск Yandex.command` либо выполните:
+На macOS дважды нажмите `Запустить поиск Yandex.command`: для первой проверки
+оставьте предложенный лимит 3, а после успешного результата запустите все 20.
+Либо выполните вручную:
 
 ```bash
 cd ~/Downloads/competitor-intelligence
