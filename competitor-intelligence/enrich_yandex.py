@@ -43,6 +43,7 @@ NO_OFFICIAL_SITE_DOMAINS = LEGAL_DOMAINS | {
     "yandex.ru",
     "2gis.ru",
     "vk.com",
+    "vk.ru",
     "youtube.com",
     "rutube.ru",
     "instagram.com",
@@ -53,6 +54,12 @@ NO_OFFICIAL_SITE_DOMAINS = LEGAL_DOMAINS | {
     "orgpage.ru",
     "spravker.ru",
     "t.me",
+    "checksite.ru",
+    "flamp.ru",
+    "rubrikator.org",
+    "otzywy.com",
+    "tilbagevise.ru",
+    "uslugi.yandex.ru",
 }
 SERVICE_WORDS = {
     "гидроизоляция",
@@ -148,7 +155,7 @@ def is_unsearchable_identity(competitor: dict[str, str]) -> bool:
 def extract_legal(text: str) -> tuple[str, str, str]:
     plain = re.sub(r"\s+", " ", text)
     legal = re.search(
-        r"\b(ООО|ИП|АО|ПАО)\s*[«\"“]?([А-ЯЁA-Z0-9][^|;,.!?<>]{1,80})",
+        r"\b(ООО|ИП|АО|ПАО|ЗАО|ОАО)\s*[«\"“]?([А-ЯЁA-Z0-9][^|;,.!?<>]{1,80})",
         plain,
         re.I,
     )
@@ -177,6 +184,12 @@ def classify_result(domain: str) -> str:
     return "other"
 
 
+def phrase_in(phrase: str, text: str) -> bool:
+    if not phrase:
+        return False
+    return bool(re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text))
+
+
 def score_result(result: SearchResult, competitor: dict[str, str]) -> SearchResult:
     name = clean(competitor.get("legal_name_hint")) or clean(competitor.get("seller"))
     haystack = normalize(f"{result.title} {result.snippet} {result.domain}")
@@ -186,10 +199,11 @@ def score_result(result: SearchResult, competitor: dict[str, str]) -> SearchResu
     query_legal = "site:rusprofile.ru" in result.query or "site:checko.ru" in result.query
 
     score = 0
-    if normalized_name and normalized_name in haystack:
+    if phrase_in(normalized_name, haystack):
         score += 35
     if tokens:
-        matched = sum(token in haystack for token in tokens)
+        haystack_tokens = set(haystack.split())
+        matched = sum(token in haystack_tokens for token in tokens)
         score += round(30 * matched / len(tokens))
     if any(word in haystack for word in SERVICE_WORDS):
         score += 10
@@ -205,18 +219,23 @@ def score_result(result: SearchResult, competitor: dict[str, str]) -> SearchResu
             score += 12
 
     legal_name, inn, ogrn = extract_legal(f"{result.title} {result.snippet}")
-    if inn:
+    expected_inns = set(re.findall(r"\d{10}|\d{12}", " ".join([clean(competitor.get("inn_hint")), clean(competitor.get("inn"))])))
+    inn_confirmed = bool(inn and inn in expected_inns)
+    if inn_confirmed:
+        score += 45
+    elif inn:
         score += 20
     if legal_name and normalize(legal_name) == normalized_name:
         score += 25
-    if is_generic_name(name):
+    if is_generic_name(name) and not inn_confirmed:
         score -= 25
     score = max(0, min(100, score))
 
     confidence = "low"
-    if score >= 70 and (inn or (legal_name and normalized_name in normalize(legal_name))):
+    exact_legal_hint = bool(clean(competitor.get("legal_name_hint"))) and normalize(legal_name) == normalize(clean(competitor.get("legal_name_hint")))
+    if (inn_confirmed and score >= 55) or (exact_legal_hint and score >= 75):
         confidence = "high"
-    elif score >= 45:
+    elif score >= 55:
         confidence = "medium"
     result.score = score
     result.confidence = confidence
@@ -249,6 +268,50 @@ def query_plan(competitor: dict[str, str], max_queries: int) -> list[str]:
         queries.append(f"{seller_phrase} ИНН гидроизоляция")
     queries.append(f"{name_phrase} инъектирование")
     return list(dict.fromkeys(queries))[:max_queries]
+
+
+def adaptive_queries(competitor: dict[str, str], collected: list[SearchResult], max_queries: int) -> list[str]:
+    """Choose follow-up searches from evidence found by the first query."""
+    if max_queries <= 1:
+        return []
+    scored = sorted(collected, key=lambda item: item.score, reverse=True)
+    website = next(
+        (item for item in scored if item.result_type == "official_site_candidate" and item.score >= 55),
+        None,
+    )
+    queries = []
+    if website:
+        queries.append(f"site:{website.domain} ИНН ОГРН реквизиты")
+    exact_identity = next((item for item in scored if item.inn and item.score >= 55), None)
+    if exact_identity:
+        queries.extend(
+            [
+                f"site:rusprofile.ru {exact_identity.inn}",
+                f"site:checko.ru {exact_identity.inn}",
+            ]
+        )
+    else:
+        name = clean(competitor.get("legal_name_hint")) or clean(competitor.get("seller"))
+        phrase = quoted(name)
+        queries.extend([f"site:rusprofile.ru {phrase}", f"site:checko.ru {phrase}"])
+    return list(dict.fromkeys(queries))[: max(0, max_queries - 1)]
+
+
+def registry_queries(competitor: dict[str, str], collected: list[SearchResult], preferred_domain: str = "") -> list[str]:
+    trusted_identity = next(
+        (
+            item
+            for item in sorted(collected, key=lambda value: value.score, reverse=True)
+            if item.inn
+            and ((preferred_domain and item.domain == preferred_domain) or (not preferred_domain and item.score >= 55))
+        ),
+        None,
+    )
+    if trusted_identity:
+        return [f"site:rusprofile.ru {trusted_identity.inn}", f"site:checko.ru {trusted_identity.inn}"]
+    name = clean(competitor.get("legal_name_hint")) or clean(competitor.get("seller"))
+    phrase = quoted(name)
+    return [f"site:rusprofile.ru {phrase}", f"site:checko.ru {phrase}"]
 
 
 def decode_xml_response(payload: dict) -> str:
@@ -386,20 +449,20 @@ AUTO_FIELDS = [
 
 def choose_candidates(results: list[SearchResult]) -> dict[str, str]:
     ranked = sorted(results, key=lambda item: (item.score, item.confidence == "high"), reverse=True)
-    legal = next((item for item in ranked if item.result_type == "legal_registry"), None)
-    website = next((item for item in ranked if item.result_type == "official_site_candidate"), None)
-    best = legal or website or (ranked[0] if ranked else None)
+    legal = next((item for item in ranked if item.result_type == "legal_registry" and item.score >= 70), None)
+    website = next((item for item in ranked if item.result_type == "official_site_candidate" and item.score >= 55), None)
+    best = website or legal
     evidence = []
     for item in ranked:
         if item.score >= 35 and item.url not in evidence:
             evidence.append(item.url)
     return {
-        "auto_search_status": "found" if ranked else "no_results",
+        "auto_search_status": "candidate_found" if best else ("no_reliable_candidate" if ranked else "no_results"),
         "auto_match_confidence": best.confidence if best else "none",
         "auto_match_score": str(best.score) if best else "0",
-        "auto_legal_name_candidate": (legal.legal_name if legal else "") or (best.legal_name if best else ""),
-        "auto_inn_candidate": (legal.inn if legal else "") or (best.inn if best else ""),
-        "auto_ogrn_candidate": (legal.ogrn if legal else "") or (best.ogrn if best else ""),
+        "auto_legal_name_candidate": legal.legal_name if legal else "",
+        "auto_inn_candidate": legal.inn if legal else "",
+        "auto_ogrn_candidate": legal.ogrn if legal else "",
         "auto_website_candidate": website.url if website else "",
         "auto_legal_record_url": legal.url if legal else "",
         "auto_evidence_urls": "\n".join(evidence[:8]),
@@ -493,9 +556,45 @@ def main() -> None:
             continue
         collected: dict[str, SearchResult] = {}
         try:
-            for query in plans[seller]:
-                for result in client.search(query):
+            initial_query = plans[seller][0]
+            actual_queries = [initial_query]
+            for result in client.search(initial_query):
+                scored = score_result(result, row)
+                collected[scored.url] = scored
+            remaining = max(0, args.max_queries - 1)
+            website = next(
+                (
+                    item
+                    for item in sorted(collected.values(), key=lambda value: value.score, reverse=True)
+                    if item.result_type == "official_site_candidate" and item.score >= 55
+                ),
+                None,
+            )
+            if website and remaining:
+                site_query = f"site:{website.domain} ИНН ОГРН реквизиты"
+                actual_queries.append(site_query)
+                for result in client.search(site_query):
                     scored = score_result(result, row)
+                    previous = collected.get(scored.url)
+                    if previous is None or scored.score > previous.score:
+                        collected[scored.url] = scored
+                remaining -= 1
+            trusted_site_identity = next(
+                (
+                    item
+                    for item in sorted(collected.values(), key=lambda value: value.score, reverse=True)
+                    if website and item.domain == website.domain and item.inn
+                ),
+                None,
+            )
+            scoring_context = dict(row)
+            if trusted_site_identity:
+                scoring_context["inn_hint"] = trusted_site_identity.inn
+            followups = registry_queries(row, list(collected.values()), website.domain if website else "")[:remaining]
+            actual_queries.extend(followups)
+            for query in followups:
+                for result in client.search(query):
+                    scored = score_result(result, scoring_context)
                     previous = collected.get(scored.url)
                     if previous is None or scored.score > previous.score:
                         collected[scored.url] = scored
@@ -509,7 +608,7 @@ def main() -> None:
         results_by_seller[seller] = results
         flat_results.extend((seller, result) for result in results)
         row.update(choose_candidates(results))
-        row["auto_queries"] = "\n".join(plans[seller])
+        row["auto_queries"] = "\n".join(actual_queries)
 
     write_csv(args.output_dir / "competitors.enriched.csv", rows, original_fields)
     write_results_csv(args.output_dir / "search-results.csv", flat_results)
